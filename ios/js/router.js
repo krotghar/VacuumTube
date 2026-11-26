@@ -42,6 +42,17 @@ module.exports = () => {
             post({ type: 'open', command: json })
             return false
         })
+        // While the player page is on the screen the browsing page must stay silent: previews are stopped as they start
+        // (Shorts are not previews and play on).
+        let quiet = false
+        const pauseIfQuiet = (e) => {
+            if (quiet && ![...document.querySelectorAll('ytlr-shorts-page')].some(page => page.getBoundingClientRect().width > 0)) e.target.pause?.()
+        }
+        for (const type of ['play', 'playing']) document.addEventListener(type, pauseIfQuiet, true)
+        window.__vtQuiet = (value) => {
+            quiet = value
+            if (quiet) for (const video of document.querySelectorAll('video')) pauseIfQuiet({ target: video })
+        }
         // Safety net: if a video still opens here while the player is ready, say so (it plays here as before).
         window.addEventListener('hashchange', () => {
             if (window.__vtPlayerReady === true && isWatch()) post({ type: 'log', text: 'browser opened ' + location.hash })
@@ -71,6 +82,29 @@ module.exports = () => {
         post({ type: 'forward', command: json })
         return false
     })
+
+    window.__vtPause = () => document.querySelector('.html5-video-player')?.pauseVideo?.()
+
+    // The displayed picture inside the <video> element (it is letterboxed), for the native minimize animation.
+    window.__vtVideoRect = () => {
+        const video = document.querySelector('video')
+        if (!video) return null
+        const r = video.getBoundingClientRect()
+        const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : r.width / r.height
+        let w = r.width
+        let h = r.height
+        if (w / h > aspect) w = h * aspect
+        else h = w / aspect
+        return [r.left + (r.width - w) / 2, r.top + (r.height - h) / 2, w, h]
+    }
+
+    // Back from the system PiP window: the native side brings the player to the screen.
+    let wasPip = false
+    document.addEventListener('webkitpresentationmodechanged', (e) => {
+        const mode = e.target.webkitPresentationMode
+        if (mode === 'inline' && wasPip) post({ type: 'pipInline' })
+        wasPip = mode === 'picture-in-picture'
+    }, true)
 
     let ready = false
     setInterval(() => {

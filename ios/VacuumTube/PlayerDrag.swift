@@ -1,8 +1,8 @@
 import UIKit
 import WebKit
 
-// Swipe down in the player: the page follows the finger, shrinks and rounds its corners; past the threshold it slides away
-// and `commit` decides what happens to the player (now: leave it; the mini player will plug in here).
+// Swipe down in the player. In the dedicated player page it minimizes the player: the page follows the finger towards the corner
+// and settles there or springs back. In the browsing page (player not ready) it shrinks and slides away and `commit` leaves the player.
 @MainActor
 final class PlayerDrag: NSObject, UIGestureRecognizerDelegate {
     private static let distance: CGFloat = 140
@@ -10,12 +10,6 @@ final class PlayerDrag: NSObject, UIGestureRecognizerDelegate {
 
     /// Called once the page is out of sight; `finish(true)` brings it back with a fade, `finish(false)` leaves it to the caller.
     var commit: (_ shell: ShellView, _ finish: @escaping @MainActor (Bool) -> Void) -> Void = { shell, finish in
-        if shell.playerOpen {
-            // The player page is hidden by the shell; the browsing page below stays as it was.
-            shell.closePlayerOffscreen()
-            finish(false)
-            return
-        }
         shell.webView.callAsyncJavaScript("return await window.__vtLeavePlayer?.()", arguments: [:], in: nil, in: .page) { _ in
             MainActor.assumeIsolated { finish(true) }
         }
@@ -44,6 +38,22 @@ final class PlayerDrag: NSObject, UIGestureRecognizerDelegate {
     @objc private func pan(_ gesture: UIPanGestureRecognizer) {
         guard let shell else { return }
         let dy = max(0, gesture.translation(in: shell).y)
+        if shell.playerFull {
+            // The player page is minimized: it follows the finger towards the corner.
+            switch gesture.state {
+            case .began:
+                shell.beginPlayerDrag()
+            case .changed:
+                shell.dragPlayer(progress: min(1, dy / (0.5 * shell.bounds.height)))
+            case .ended:
+                shell.settlePlayer(toMini: dy >= Self.distance || gesture.velocity(in: shell).y >= Self.velocity)
+            case .cancelled, .failed:
+                shell.settlePlayer(toMini: false)
+            default:
+                break
+            }
+            return
+        }
         switch gesture.state {
         case .changed:
             follow(dy: dy, in: shell)

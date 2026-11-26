@@ -492,12 +492,19 @@ module.exports = () => {
 
     window.__vtBack = back
     window.__vtLeavePlayer = leavePlayerAndWait
+    // The native side shrinks the player into a corner: our buttons go away and an open panel is hidden (one Escape; more would leave).
+    window.__vtMinimized = async (mini) => {
+        window.__vtMini = mini
+        if (!mini || !isWatch()) return
+        if (sidePanelOpen()) await closeSidePanels()
+        else if (overlayVisible()) pressKey(BACK)
+    }
 
     if (document.head) disableZoom()
     else document.addEventListener('DOMContentLoaded', disableZoom, { once: true })
 
-    overlayButton('10px', [{ d: 'M15 5l-7 7 7 7' }], back, () => (isWatch() && overlayVisible()) || isShorts())
-    overlayButton('64px', [{ d: 'M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5' }, { d: 'M14 14h7v6h-7z', fill: 'white' }], togglePictureInPicture, () => isWatch() && overlayVisible())
+    overlayButton('10px', [{ d: 'M15 5l-7 7 7 7' }], back, () => !window.__vtMini && ((isWatch() && overlayVisible()) || isShorts()))
+    overlayButton('64px', [{ d: 'M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5' }, { d: 'M14 14h7v6h-7z', fill: 'white' }], togglePictureInPicture, () => !window.__vtMini && isWatch() && overlayVisible())
     feedFollowsScroll()
     endScreenTaps()
     playerGestures()

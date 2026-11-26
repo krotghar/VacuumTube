@@ -29,6 +29,7 @@ struct LeanbackView: UIViewRepresentable {
         var onDidCommit: (@MainActor () -> Void)?
         var onDidFinish: (@MainActor () -> Void)?
         var onTerminate: (@MainActor () -> Void)?
+        var onStateChange: (@MainActor () -> Void)?
         private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.krotghar.VacuumTube", category: "webview")
         private var terminations: [Date] = []
         private var pendingReload = false
@@ -115,6 +116,7 @@ struct LeanbackView: UIViewRepresentable {
             }
             if message.name == "vtState" {
                 state = PageState(message.body as? [String: Any] ?? [:])
+                onStateChange?()
                 return
             }
             #if DEBUG
