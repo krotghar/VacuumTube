@@ -98,6 +98,39 @@ function seek(x) {
 
 // Vertical lists are virtual: Leanback renders a window of shelves around the focused one and fetches more only when focus
 // reaches the last shelf. A finger scroll does not move focus, so at the bottom we walk focus down to the last rendered shelf.
+function backButton() {
+    const button = document.createElement('div')
+    // innerHTML is blocked by the page's Trusted Types policy.
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', width: '24', height: '24', fill: 'none', stroke: 'white', 'stroke-width': '2.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) {
+        svg.setAttribute(name, value)
+    }
+    path.setAttribute('d', 'M15 5l-7 7 7 7')
+    svg.appendChild(path)
+    button.appendChild(svg)
+    Object.assign(button.style, {
+        position: 'fixed', top: '10px', left: '10px', width: '44px', height: '44px', zIndex: '9999',
+        display: 'none', alignItems: 'center', justifyContent: 'center',
+        borderRadius: '50%', background: 'rgba(0, 0, 0, 0.5)'
+    })
+
+    for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click']) {
+        window.addEventListener(type, (e) => {
+            if (e.target !== button && !button.contains(e.target)) return
+            e.stopImmediatePropagation()
+            if (type === 'pointerup') back()
+        }, true)
+    }
+
+    // Leanback rebuilds <body> while booting, so re-attach whenever the button is gone.
+    setInterval(() => {
+        if (!button.isConnected && document.body) document.body.appendChild(button)
+        const visible = !isRoot() && (!isWatch() || overlayVisible())
+        button.style.display = visible ? 'flex' : 'none'
+    }, 250)
+}
+
 function feedFollowsScroll() {
     const SELECTOR = 'ytlr-section-list-renderer > yt-virtual-list'
     let timer = null
@@ -206,6 +239,7 @@ module.exports = () => {
         html { -webkit-user-select: none; -webkit-touch-callout: none; }
         ytlr-tile-header-renderer::after, yt-lockup-view-model thumbnail::after { display: none !important; }
         ytlr-watch-default ytlr-pivot { display: none !important; }
+        ytlr-squeezeback-player-overlay yt-focus-container:has(ytlr-progress-bar) { top: auto !important; bottom: 2rem !important; }
     `)
 
     window.__vtBack = back
@@ -213,6 +247,7 @@ module.exports = () => {
     if (document.head) disableZoom()
     else document.addEventListener('DOMContentLoaded', disableZoom, { once: true })
 
+    backButton()
     feedFollowsScroll()
     playerGestures()
 }
