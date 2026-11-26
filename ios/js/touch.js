@@ -55,10 +55,23 @@ async function leavePlayer() {
     }
 }
 
+// Settings, its sub-menus, description and comments open in this stage and shrink the video to the left.
+const sidePanelOpen = () => !!document.querySelector('yt-unified-overlay-stage ytlr-animated-overlay')
+
+async function closeSidePanels() {
+    // A panel takes ~370 ms to close and ignores Escape meanwhile.
+    for (let i = 0; i < 3 && sidePanelOpen(); i++) {
+        pressKey(BACK)
+        await sleep(450)
+    }
+}
+
 async function togglePause() {
     const p = player()
     if (!p) return
-    if (overlayVisible()) {
+    if (sidePanelOpen()) {
+        await closeSidePanels()
+    } else if (overlayVisible()) {
         p.playVideo()
         pressKey(BACK)
     } else {
