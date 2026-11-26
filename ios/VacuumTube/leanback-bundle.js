@@ -9,6 +9,378 @@
     }
   };
 
+  // src/preload/util/jsonModifiers.js
+  var require_jsonModifiers = __commonJS({
+    "src/preload/util/jsonModifiers.js"(exports, module) {
+      var modifiers = [];
+      var jsonParse = JSON.parse;
+      JSON.parse = function(...args) {
+        let json = jsonParse(...args);
+        if (typeof json !== "object" || json === null) return json;
+        try {
+          for (let modifier of modifiers) {
+            json = modifier(json);
+          }
+        } catch (err) {
+          console.error("a json modifier failed", err);
+        }
+        return json;
+      };
+      function addModifier(func) {
+        modifiers.push(func);
+      }
+      module.exports = {
+        addModifier
+      };
+    }
+  });
+
+  // src/preload/util/functions.js
+  var require_functions = __commonJS({
+    "src/preload/util/functions.js"(exports, module) {
+      function el(tag, attrs = {}, children = []) {
+        const element = document.createElement(tag);
+        for (const [key, value] of Object.entries(attrs)) {
+          if (key === "className") {
+            element.className = value;
+          } else if (key === "textContent") {
+            element.textContent = value;
+          } else if (key === "style" && typeof value === "object") {
+            Object.assign(element.style, value);
+          } else if (key.startsWith("data")) {
+            element.setAttribute(key.replace(/([A-Z])/g, "-$1").toLowerCase(), value);
+          } else {
+            element.setAttribute(key, value);
+          }
+        }
+        for (const child of children) {
+          if (child) element.appendChild(child);
+        }
+        return element;
+      }
+      async function waitForSelector(selector) {
+        return new Promise((resolve) => {
+          let observer = new MutationObserver(() => {
+            let el3 = document.querySelector(selector);
+            if (el3) {
+              resolve(el3);
+              observer.disconnect();
+            }
+          });
+          observer.observe(document.documentElement, {
+            childList: true,
+            subtree: true
+          });
+          let el2 = document.querySelector(selector);
+          if (el2) {
+            resolve(el2);
+            observer.disconnect();
+          }
+        });
+      }
+      async function waitForCondition(func) {
+        return await new Promise((resolve) => {
+          if (func()) return resolve();
+          let interval = setInterval(() => {
+            if (!func()) return;
+            clearInterval(interval);
+            resolve();
+          }, 10);
+        });
+      }
+      function deepMerge(current, updates) {
+        for (let key of Object.keys(updates)) {
+          if (!current.hasOwnProperty(key) || typeof updates[key] !== "object") {
+            if (updates[key] === "__DELETE__") {
+              delete current[key];
+            } else {
+              current[key] = updates[key];
+            }
+          } else {
+            deepMerge(current[key], updates[key]);
+          }
+        }
+        return current;
+      }
+      module.exports = {
+        el,
+        waitForSelector,
+        waitForCondition,
+        deepMerge
+      };
+    }
+  });
+
+  // src/preload/util/xhrModifiers.js
+  var require_xhrModifiers = __commonJS({
+    "src/preload/util/xhrModifiers.js"(exports, module) {
+      var functions = require_functions();
+      var responseModifiers = [];
+      var requestModifiers = [];
+      var OriginalXMLHttpRequest = window.XMLHttpRequest;
+      var nativeResponseText = Object.getOwnPropertyDescriptor(OriginalXMLHttpRequest.prototype, "responseText").get;
+      var nativeResponse = Object.getOwnPropertyDescriptor(OriginalXMLHttpRequest.prototype, "response").get;
+      var responseEvents = ["readystatechange", "load", "loadend"];
+      var blocked = false;
+      function XMLHttpRequest() {
+        const xhr = new OriginalXMLHttpRequest();
+        const originalOpen = xhr.open;
+        const originalSend = xhr.send;
+        const originalAddEventListener = xhr.addEventListener;
+        const originalRemoveEventListener = xhr.removeEventListener;
+        let url = null;
+        let modification = null;
+        let modifiedText = null;
+        let request = 0;
+        function modifyResponse() {
+          if (!modification) {
+            let current = request;
+            modification = (async () => {
+              if (xhr.responseType !== "" && xhr.responseType !== "text") return;
+              if (xhr.status === 0) return;
+              let text = nativeResponseText.call(xhr);
+              for (let modifier of responseModifiers) {
+                try {
+                  let modified = await modifier(url, text);
+                  if (modified === void 0) continue;
+                  text = modified;
+                } catch (err) {
+                  console.error("an xhr response modifier failed", err);
+                }
+              }
+              if (current === request) modifiedText = text;
+            })();
+          }
+          return modification;
+        }
+        function createWrapper(listener) {
+          return async function(event) {
+            if (xhr.readyState === 4) {
+              let current = request;
+              await modifyResponse();
+              if (current !== request) return;
+            }
+            if (typeof listener === "function") {
+              listener.call(xhr, event);
+            } else {
+              listener.handleEvent(event);
+            }
+          };
+        }
+        const wrappers = Object.fromEntries(responseEvents.map((type) => [type, /* @__PURE__ */ new WeakMap()]));
+        function wrap(type, listener) {
+          if (!wrappers[type].has(listener)) wrappers[type].set(listener, createWrapper(listener));
+          return wrappers[type].get(listener);
+        }
+        xhr.addEventListener = function(type, listener, options) {
+          if (responseEvents.includes(type) && listener) {
+            return originalAddEventListener.call(this, type, wrap(type, listener), options);
+          }
+          return originalAddEventListener.apply(this, arguments);
+        };
+        xhr.removeEventListener = function(type, listener, options) {
+          if (responseEvents.includes(type) && listener) {
+            return originalRemoveEventListener.call(this, type, wrappers[type].get(listener) ?? listener, options);
+          }
+          return originalRemoveEventListener.apply(this, arguments);
+        };
+        for (let type of responseEvents) {
+          let handler = null;
+          let wrapper = null;
+          Object.defineProperty(xhr, `on${type}`, {
+            configurable: true,
+            get() {
+              return handler;
+            },
+            set(value) {
+              if (wrapper) originalRemoveEventListener.call(xhr, type, wrapper);
+              handler = typeof value === "function" ? value : null;
+              wrapper = handler ? createWrapper(handler) : null;
+              if (wrapper) originalAddEventListener.call(xhr, type, wrapper);
+            }
+          });
+        }
+        for (let [property, nativeGetter] of [["responseText", nativeResponseText], ["response", nativeResponse]]) {
+          Object.defineProperty(xhr, property, {
+            configurable: true,
+            get() {
+              return modifiedText ?? nativeGetter.call(xhr);
+            }
+          });
+        }
+        xhr.open = function(method, requestUrl) {
+          url = String(requestUrl);
+          modification = null;
+          modifiedText = null;
+          request++;
+          return originalOpen.apply(this, arguments);
+        };
+        xhr.send = function(body) {
+          for (let modifier of requestModifiers) {
+            try {
+              body = modifier(url, body);
+            } catch (err) {
+              console.error("an xhr request modifier failed", err);
+            }
+          }
+          if (!blocked) return originalSend.call(this, body);
+          functions.waitForCondition(() => !blocked).then(() => originalSend.call(xhr, body)).catch((err) => {
+            console.error("failed to send xhr request", err);
+          });
+        };
+        return xhr;
+      }
+      XMLHttpRequest.prototype = OriginalXMLHttpRequest.prototype;
+      for (let key of ["UNSENT", "OPENED", "HEADERS_RECEIVED", "LOADING", "DONE"]) {
+        XMLHttpRequest[key] = OriginalXMLHttpRequest[key];
+      }
+      window.XMLHttpRequest = XMLHttpRequest;
+      function addResponseModifier(func) {
+        responseModifiers.push(func);
+      }
+      function addRequestModifier(func) {
+        requestModifiers.push(func);
+      }
+      function block() {
+        blocked = true;
+      }
+      function unblock() {
+        blocked = false;
+      }
+      module.exports = {
+        addResponseModifier,
+        addRequestModifier,
+        block,
+        unblock
+      };
+    }
+  });
+
+  // ios/js/defaults.js
+  var require_defaults = __commonJS({
+    "ios/js/defaults.js"(exports, module) {
+      module.exports = {
+        adblock: true,
+        touch_overlay: false,
+        h264ify: true,
+        h264ify_disable_av1: false,
+        h264ify_disable_webm: false,
+        h264ify_disable_vp8: false,
+        h264ify_disable_vp9: false
+      };
+    }
+  });
+
+  // ios/js/shims/electron.js
+  var require_electron = __commonJS({
+    "ios/js/shims/electron.js"(exports, module) {
+      var defaults = require_defaults();
+      var currentConfig = () => ({ ...defaults, ...globalThis.__vtConfigOverrides || {} });
+      var ipcRenderer = {
+        sendSync(channel, payload) {
+          if (channel === "get-config") return currentConfig();
+          if (channel === "set-config") return { ...currentConfig(), ...payload };
+          return void 0;
+        },
+        on() {
+        },
+        once() {
+        },
+        removeListener() {
+        },
+        send() {
+        },
+        invoke() {
+          return Promise.resolve(void 0);
+        }
+      };
+      module.exports = { ipcRenderer };
+    }
+  });
+
+  // src/preload/config.js
+  var require_config = __commonJS({
+    "src/preload/config.js"(exports, module) {
+      var { ipcRenderer } = require_electron();
+      var config = ipcRenderer.sendSync("get-config");
+      var sharedConfig = { ...config };
+      ipcRenderer.on("config-update", (event, newConfig) => {
+        for (let key in sharedConfig) delete sharedConfig[key];
+        for (let key in newConfig) sharedConfig[key] = newConfig[key];
+      });
+      function get() {
+        return sharedConfig;
+      }
+      function set(newConfig) {
+        let updated = ipcRenderer.sendSync("set-config", newConfig);
+        for (let key in sharedConfig) delete sharedConfig[key];
+        for (let key in updated) sharedConfig[key] = updated[key];
+      }
+      module.exports = {
+        get,
+        set
+      };
+    }
+  });
+
+  // src/preload/modules/adblock.js
+  var require_adblock = __commonJS({
+    "src/preload/modules/adblock.js"(exports, module) {
+      var jsonMod = require_jsonModifiers();
+      var xhrModifiers = require_xhrModifiers();
+      var configManager = require_config();
+      var config = configManager.get();
+      module.exports = () => {
+        xhrModifiers.addResponseModifier((url, text) => {
+          if (!config.adblock) return;
+          if (!url.startsWith("/youtubei/v1/browse") && !url.startsWith("/youtubei/v1/search")) {
+            return;
+          }
+          let json = JSON.parse(text);
+          if (url.startsWith("/youtubei/v1/browse")) {
+            let homeFeed = json.contents?.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer;
+            if (!homeFeed || !homeFeed.contents) return;
+            homeFeed.contents = homeFeed.contents.filter(
+              (r) => !r.adSlotRenderer && !r.promoShelfRenderer && !r.shelfRenderer?.tvhtml5Metadata?.hideLogo
+              /*only appears on premium upsells*/
+            );
+            for (let feed of homeFeed.contents) {
+              let horizontal = feed?.shelfRenderer?.content?.horizontalListRenderer;
+              if (!horizontal?.items) continue;
+              horizontal.items = horizontal.items.filter((i) => !i.adSlotRenderer);
+            }
+          } else if (url.startsWith("/youtubei/v1/search")) {
+            let searchFeed = json.contents?.sectionListRenderer;
+            if (!searchFeed || !searchFeed.contents) return;
+            for (let feed of searchFeed.contents) {
+              let horizontal = feed?.shelfRenderer?.content?.horizontalListRenderer;
+              if (!horizontal?.items) continue;
+              horizontal.items = horizontal.items.filter((i) => !i.adSlotRenderer);
+            }
+          }
+          return JSON.stringify(json);
+        });
+        jsonMod.addModifier((json) => {
+          if (!config.adblock) return json;
+          if (json?.adPlacements) {
+            json.adPlacements = [];
+          }
+          if (json?.adSlots) {
+            json.adSlots = [];
+          }
+          return json;
+        });
+        jsonMod.addModifier((json) => {
+          if (!config.adblock) return json;
+          if (json?.entries && Array.isArray(json.entries)) {
+            json.entries = json.entries.filter((e) => !e?.command?.reelWatchEndpoint?.adClientParams?.isAd);
+          }
+          return json;
+        });
+      };
+    }
+  });
+
   // src/preload/style.css
   var require_style = __commonJS({
     "src/preload/style.css"(exports, module) {
@@ -95,72 +467,6 @@
     }
   });
 
-  // ios/js/defaults.js
-  var require_defaults = __commonJS({
-    "ios/js/defaults.js"(exports, module) {
-      module.exports = {
-        touch_overlay: false,
-        h264ify: true,
-        h264ify_disable_av1: false,
-        h264ify_disable_webm: false,
-        h264ify_disable_vp8: false,
-        h264ify_disable_vp9: false
-      };
-    }
-  });
-
-  // ios/js/shims/electron.js
-  var require_electron = __commonJS({
-    "ios/js/shims/electron.js"(exports, module) {
-      var defaults = require_defaults();
-      var currentConfig = () => ({ ...defaults, ...globalThis.__vtConfigOverrides || {} });
-      var ipcRenderer = {
-        sendSync(channel, payload) {
-          if (channel === "get-config") return currentConfig();
-          if (channel === "set-config") return { ...currentConfig(), ...payload };
-          return void 0;
-        },
-        on() {
-        },
-        once() {
-        },
-        removeListener() {
-        },
-        send() {
-        },
-        invoke() {
-          return Promise.resolve(void 0);
-        }
-      };
-      module.exports = { ipcRenderer };
-    }
-  });
-
-  // src/preload/config.js
-  var require_config = __commonJS({
-    "src/preload/config.js"(exports, module) {
-      var { ipcRenderer } = require_electron();
-      var config = ipcRenderer.sendSync("get-config");
-      var sharedConfig = { ...config };
-      ipcRenderer.on("config-update", (event, newConfig) => {
-        for (let key in sharedConfig) delete sharedConfig[key];
-        for (let key in newConfig) sharedConfig[key] = newConfig[key];
-      });
-      function get() {
-        return sharedConfig;
-      }
-      function set(newConfig) {
-        let updated = ipcRenderer.sendSync("set-config", newConfig);
-        for (let key in sharedConfig) delete sharedConfig[key];
-        for (let key in updated) sharedConfig[key] = updated[key];
-      }
-      module.exports = {
-        get,
-        set
-      };
-    }
-  });
-
   // src/preload/modules/h264ify.js
   var require_h264ify = __commonJS({
     "src/preload/modules/h264ify.js"(exports, module) {
@@ -232,82 +538,6 @@
           }
           return isTypeSupported(kept.join("; "));
         };
-      };
-    }
-  });
-
-  // src/preload/util/functions.js
-  var require_functions = __commonJS({
-    "src/preload/util/functions.js"(exports, module) {
-      function el(tag, attrs = {}, children = []) {
-        const element = document.createElement(tag);
-        for (const [key, value] of Object.entries(attrs)) {
-          if (key === "className") {
-            element.className = value;
-          } else if (key === "textContent") {
-            element.textContent = value;
-          } else if (key === "style" && typeof value === "object") {
-            Object.assign(element.style, value);
-          } else if (key.startsWith("data")) {
-            element.setAttribute(key.replace(/([A-Z])/g, "-$1").toLowerCase(), value);
-          } else {
-            element.setAttribute(key, value);
-          }
-        }
-        for (const child of children) {
-          if (child) element.appendChild(child);
-        }
-        return element;
-      }
-      async function waitForSelector(selector) {
-        return new Promise((resolve) => {
-          let observer = new MutationObserver(() => {
-            let el3 = document.querySelector(selector);
-            if (el3) {
-              resolve(el3);
-              observer.disconnect();
-            }
-          });
-          observer.observe(document.documentElement, {
-            childList: true,
-            subtree: true
-          });
-          let el2 = document.querySelector(selector);
-          if (el2) {
-            resolve(el2);
-            observer.disconnect();
-          }
-        });
-      }
-      async function waitForCondition(func) {
-        return await new Promise((resolve) => {
-          if (func()) return resolve();
-          let interval = setInterval(() => {
-            if (!func()) return;
-            clearInterval(interval);
-            resolve();
-          }, 10);
-        });
-      }
-      function deepMerge(current, updates) {
-        for (let key of Object.keys(updates)) {
-          if (!current.hasOwnProperty(key) || typeof updates[key] !== "object") {
-            if (updates[key] === "__DELETE__") {
-              delete current[key];
-            } else {
-              current[key] = updates[key];
-            }
-          } else {
-            deepMerge(current[key], updates[key]);
-          }
-        }
-        return current;
-      }
-      module.exports = {
-        el,
-        waitForSelector,
-        waitForCondition,
-        deepMerge
       };
     }
   });
@@ -847,6 +1077,7 @@ ytlr-section-list-renderer > yt-virtual-list { height: calc(100vh - 6.75rem) !im
   // ios/js/entry.js
   if (location.host === "www.youtube.com" && location.pathname === "/tv") {
     const modules = [
+      require_adblock(),
       require_css2(),
       require_h264ify(),
       require_media_capabilities(),
