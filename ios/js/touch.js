@@ -3,6 +3,7 @@ const css = require('./shims/css')
 
 const BACK = 27
 const UP = 38
+const DOWN = 40
 
 const TAP_SLOP = 20
 const SWIPE_MIN = 80
@@ -95,6 +96,36 @@ function seek(x) {
     showSeekHint(seconds)
 }
 
+// Vertical lists are virtual: Leanback renders a window of shelves around the focused one and fetches more only when focus
+// reaches the last shelf. A finger scroll does not move focus, so at the bottom we walk focus down to the last rendered shelf.
+function feedFollowsScroll() {
+    const SELECTOR = 'ytlr-section-list-renderer > yt-virtual-list'
+    let timer = null
+    let busy = false
+
+    async function follow(list) {
+        const section = list.parentElement.__instance
+        if (typeof section?.selectedIndex !== 'number') return
+        if (list.scrollTop + list.clientHeight < list.scrollHeight - 200) return
+        const rendered = [...list.querySelectorAll(':scope > div > div')]
+            .map(item => +(/-item-(\d+)/.exec(item.firstElementChild?.className ?? '')?.[1] ?? -1))
+        const last = Math.max(...rendered)
+        busy = true
+        for (let i = 0; i < 12 && section.selectedIndex < last; i++) {
+            pressKey(DOWN)
+            await sleep(80)
+        }
+        setTimeout(() => busy = false, 500)
+    }
+
+    document.addEventListener('scroll', (e) => {
+        const list = e.target
+        if (busy || !(list instanceof Element) || !list.matches(SELECTOR) || list.closest('ytlr-watch-default')) return
+        clearTimeout(timer)
+        timer = setTimeout(() => follow(list), 250)
+    }, true)
+}
+
 function playerGestures() {
     let start = null
     let swallow = false
@@ -182,5 +213,6 @@ module.exports = () => {
     if (document.head) disableZoom()
     else document.addEventListener('DOMContentLoaded', disableZoom, { once: true })
 
+    feedFollowsScroll()
     playerGestures()
 }

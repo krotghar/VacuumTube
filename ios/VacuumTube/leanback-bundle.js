@@ -538,6 +538,7 @@
       var css = require_css();
       var BACK = 27;
       var UP = 38;
+      var DOWN = 40;
       var TAP_SLOP = 20;
       var SWIPE_MIN = 80;
       var DOUBLE_TAP_MS = 280;
@@ -622,6 +623,30 @@
         player()?.seekBy(seconds);
         showSeekHint(seconds);
       }
+      function feedFollowsScroll() {
+        const SELECTOR = "ytlr-section-list-renderer > yt-virtual-list";
+        let timer = null;
+        let busy = false;
+        async function follow(list) {
+          const section = list.parentElement.__instance;
+          if (typeof section?.selectedIndex !== "number") return;
+          if (list.scrollTop + list.clientHeight < list.scrollHeight - 200) return;
+          const rendered = [...list.querySelectorAll(":scope > div > div")].map((item) => +(/-item-(\d+)/.exec(item.firstElementChild?.className ?? "")?.[1] ?? -1));
+          const last = Math.max(...rendered);
+          busy = true;
+          for (let i = 0; i < 12 && section.selectedIndex < last; i++) {
+            pressKey(DOWN);
+            await sleep(80);
+          }
+          setTimeout(() => busy = false, 500);
+        }
+        document.addEventListener("scroll", (e) => {
+          const list = e.target;
+          if (busy || !(list instanceof Element) || !list.matches(SELECTOR) || list.closest("ytlr-watch-default")) return;
+          clearTimeout(timer);
+          timer = setTimeout(() => follow(list), 250);
+        }, true);
+      }
       function playerGestures() {
         let start = null;
         let swallow = false;
@@ -695,6 +720,7 @@
         window.__vtBack = back;
         if (document.head) disableZoom();
         else document.addEventListener("DOMContentLoaded", disableZoom, { once: true });
+        feedFollowsScroll();
         playerGestures();
       };
     }
