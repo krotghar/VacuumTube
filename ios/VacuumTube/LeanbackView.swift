@@ -60,7 +60,8 @@ struct LeanbackView: UIViewRepresentable {
 
         func reloadPage() {
             guard let webView else { return }
-            if webView.url != nil { webView.reload() } else { webView.load(URLRequest(url: Shell.startURL)) }
+            // The player page must not come back to the video it crashed on: it restarts from the home screen.
+            if role == .browser, webView.url != nil { webView.reload() } else { webView.load(URLRequest(url: Shell.startURL)) }
         }
 
         private func showPlaceholder(in webView: WKWebView) {

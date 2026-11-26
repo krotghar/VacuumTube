@@ -42,6 +42,8 @@ final class ShellView: UIView {
     private let miniShadow = UIView()
     private let container = PlayerContainerView()
     private var videoRect: CGRect?
+    private var videoRectRequest = 0
+    private var progress: CGFloat = 0
     private var miniShorts = false
     private var laidOutSize = CGSize.zero
 
@@ -108,6 +110,13 @@ final class ShellView: UIView {
         player.transform = .identity
         player.frame = CGRect(origin: .zero, size: bounds.size)
         apply(progress: playerMode == .mini ? 1 : 0)
+        // The page lays itself out again for the new size, not instantly: until it says where its video is now, the old rectangle stays
+        // (no jump), and it is asked a few times because the first answer may still be the old layout.
+        if playerMode == .mini {
+            for delay in [0.3, 0.8, 1.6] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.refreshVideoRect() }
+            }
+        }
     }
 
     // MARK: Player page
@@ -192,6 +201,7 @@ final class ShellView: UIView {
     /// Puts the container and the page at `p`: 0 is full-screen, 1 is the mini player.
     private func apply(progress p: CGFloat) {
         guard let player = playerWebView else { return }
+        progress = p
         let g = geometry
         container.frame = g.frame(p)
         miniShadow.frame = container.frame
@@ -216,11 +226,20 @@ final class ShellView: UIView {
 
     /// Asks the page where its video is, so that the drag can aim at it.
     func beginPlayerDrag() {
+        refreshVideoRect()
+    }
+
+    /// The answer is asynchronous: the frame that is on the screen is kept until it arrives, and an answer to an older request is dropped.
+    private func refreshVideoRect() {
+        videoRectRequest += 1
+        let request = videoRectRequest
         playerWebView?.evaluateJavaScript("window.__vtVideoRect?.()") { [weak self] result, _ in
             MainActor.assumeIsolated {
-                if let r = result as? [Double], r.count == 4, r[2] > 0, r[3] > 0 {
-                    self?.videoRect = CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
-                }
+                guard let self, request == self.videoRectRequest, let r = result as? [Double], r.count == 4, r[2] > 0, r[3] > 0 else { return }
+                let rect = CGRect(x: r[0], y: r[1], width: r[2], height: r[3])
+                self.videoRect = rect
+                // A drag applies it with its next move; in the mini player, with nothing animating, it is applied now.
+                if self.playerMode == .mini, self.container.layer.animationKeys() == nil { self.apply(progress: 1) }
             }
         }
     }
@@ -274,10 +293,11 @@ final class ShellView: UIView {
         guard playerReady, let player = playerWebView else { return }
         switch playerMode {
         case .hidden:
+            // A close that has not finished its animation may still have its UI on the screen (mini shell, corners, `__vtMini`).
+            resetPlayerUI(player)
             playerMode = .full
             videoRect = nil
-            player.transform = .identity
-            container.layer.removeAllAnimations()
+            videoRectRequest += 1
             container.frame = bounds
             container.transform = CGAffineTransform(translationX: 0, y: bounds.height)
             container.alpha = 1
@@ -324,17 +344,25 @@ final class ShellView: UIView {
         returnToBrowser()
     }
 
-    /// The player is already out of sight (swipe down in the browsing page's own player).
-    func closePlayerOffscreen() {
-        guard playerMode != .hidden, let player = playerWebView else { return }
-        playerMode = .hidden
-        hidePlayer(player)
-        returnToBrowser()
-    }
-
     private func hidePlayer(_ player: WKWebView) {
         guard playerMode == .hidden else { return }
+        resetPlayerUI(player)
+        // The player page goes back to its home screen, which stops the video; then it sleeps.
+        player.callAsyncJavaScript("return await window.__vtLeavePlayer?.()", arguments: [:], in: nil, in: .page) { _ in
+            MainActor.assumeIsolated {
+                guard self.playerMode == .hidden else { return }
+                Task { await self.suspend(player, true) }
+            }
+        }
+        #if DEBUG
+        NSLog("[vt:player] hidden")
+        #endif
+    }
+
+    /// Takes the player's native shell back to its resting state; shared by hiding and by opening (a new video may open before the close animation ends).
+    private func resetPlayerUI(_ player: WKWebView) {
         container.layer.removeAllAnimations()
+        miniShadow.layer.removeAllAnimations()
         container.alpha = 0
         container.transform = .identity
         container.frame = bounds
@@ -346,16 +374,7 @@ final class ShellView: UIView {
         player.layer.cornerRadius = 0
         player.layer.masksToBounds = false
         player.isUserInteractionEnabled = false
-        // The player page goes back to its home screen, which stops the video; then it sleeps.
-        player.callAsyncJavaScript("window.__vtMini = false; return await window.__vtLeavePlayer?.()", arguments: [:], in: nil, in: .page) { _ in
-            MainActor.assumeIsolated {
-                guard self.playerMode == .hidden else { return }
-                Task { await self.suspend(player, true) }
-            }
-        }
-        #if DEBUG
-        NSLog("[vt:player] hidden")
-        #endif
+        player.evaluateJavaScript("window.__vtMini = false")
     }
 
     private func returnToBrowser() {

@@ -3449,6 +3449,7 @@
         }
       }
       var isWatch = () => location.hash.startsWith("#/watch");
+      var playerOpened = () => globalThis.__vtRole === "player" && window.__vtOpened === true;
       var player = () => document.querySelector(".html5-video-player");
       var END_SCREEN = "ytlr-player-overlay-renderer, ytlr-timely-action-renderer, ytlr-endscreen-renderer";
       function overlayVisible() {
@@ -3486,6 +3487,10 @@
         }
       }
       async function backFromPlayer() {
+        if (!isWatch()) {
+          window.webkit?.messageHandlers?.vtRoute?.postMessage({ type: "close" });
+          return;
+        }
         for (let i = 0; i < 4 && isWatch(); i++) {
           if (!overlayVisible() && !sidePanelOpen()) {
             window.webkit?.messageHandlers?.vtRoute?.postMessage({ type: "close" });
@@ -3496,14 +3501,16 @@
         }
       }
       async function leavePlayer() {
-        for (let i = 0; i < 3 && isWatch(); i++) {
+        const gen = window.__vtOpenGen;
+        for (let i = 0; i < 3 && isWatch() && window.__vtOpenGen === gen; i++) {
           pressKey(BACK);
           await sleep(300);
         }
       }
       async function leavePlayerAndWait() {
+        const gen = window.__vtOpenGen;
         leavePlayer();
-        for (let i = 0; i < 15 && isWatch(); i++) await sleep(100);
+        for (let i = 0; i < 15 && isWatch() && window.__vtOpenGen === gen; i++) await sleep(100);
       }
       var sidePanelOpen = () => !!document.querySelector("yt-unified-overlay-stage ytlr-animated-overlay");
       async function closeSidePanels() {
@@ -3769,7 +3776,7 @@
       function postState() {
         const handler = window.webkit?.messageHandlers?.vtState;
         if (!handler) return;
-        const state = { watch: isWatch(), shorts: isShorts(), sidePanel: sidePanelOpen(), canBack: !isRoot(), touchOwned };
+        const state = { watch: isWatch(), shorts: isShorts(), sidePanel: sidePanelOpen(), canBack: playerOpened() || globalThis.__vtRole !== "player" && !isRoot(), touchOwned };
         const key = JSON.stringify(state);
         if (key === postedState) return;
         postedState = key;
@@ -3870,7 +3877,7 @@
         };
         if (document.head) disableZoom();
         else document.addEventListener("DOMContentLoaded", disableZoom, { once: true });
-        overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back, () => !window.__vtMini && (isWatch() && overlayVisible() || isShorts()));
+        overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back, () => !window.__vtMini && (isWatch() && overlayVisible() || isShorts() || playerOpened() && !isWatch()));
         overlayButton("64px", [{ d: "M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" }, { d: "M14 14h7v6h-7z", fill: "white" }], togglePictureInPicture, () => !window.__vtMini && isWatch() && overlayVisible());
         feedFollowsScroll();
         endScreenTaps();
@@ -3933,16 +3940,26 @@
           });
           return;
         }
+        const WATCH_TIMEOUT_MS = 8e3;
         let opened = false;
         let sawWatch = false;
+        let openedAt = 0;
+        const setOpened = (value) => {
+          opened = value;
+          window.__vtOpened = value;
+        };
+        window.__vtOpened = false;
+        window.__vtOpenGen = 0;
         window.__vtOpen = (json) => {
-          opened = true;
+          setOpened(true);
           sawWatch = false;
+          openedAt = Date.now();
+          window.__vtOpenGen++;
           rcMod.resolveCommand(JSON.parse(json));
         };
         const leave = window.__vtLeavePlayer;
         window.__vtLeavePlayer = async () => {
-          opened = false;
+          setOpened(false);
           await leave?.();
         };
         rcMod.addInputModifier((command) => {
@@ -3978,8 +3995,8 @@
           }
           if (!opened) return;
           if (isWatch()) sawWatch = true;
-          else if (sawWatch) {
-            opened = false;
+          else if (sawWatch || Date.now() - openedAt > WATCH_TIMEOUT_MS) {
+            setOpened(false);
             post({ type: "close" });
           }
         }, 250);

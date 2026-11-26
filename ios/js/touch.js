@@ -23,6 +23,8 @@ function pressKey(keyCode) {
 }
 
 const isWatch = () => location.hash.startsWith('#/watch')
+// The player page has been asked to play a video (router.js): back is always possible then, even if the page is not at #/watch.
+const playerOpened = () => globalThis.__vtRole === 'player' && window.__vtOpened === true
 const player = () => document.querySelector('.html5-video-player')
 
 // The end screens ("UP NEXT", "Next in N", the author's cards) live in the same overlay but are not the player panel.
@@ -74,6 +76,11 @@ async function back() {
 
 // In the player page "back" hides the panels one by one, then asks the shell to close the player (Escape would leave to Leanback's home).
 async function backFromPlayer() {
+    // The page never reached the player (a dialog or toast instead of the video): there is nothing to hide, just close.
+    if (!isWatch()) {
+        window.webkit?.messageHandlers?.vtRoute?.postMessage({ type: 'close' })
+        return
+    }
     for (let i = 0; i < 4 && isWatch(); i++) {
         if (!overlayVisible() && !sidePanelOpen()) {
             window.webkit?.messageHandlers?.vtRoute?.postMessage({ type: 'close' })
@@ -84,8 +91,10 @@ async function backFromPlayer() {
     }
 }
 
+// `__vtOpenGen` changes when the shell opens another video: this leave is then over, its Escapes would hit the new one.
 async function leavePlayer() {
-    for (let i = 0; i < 3 && isWatch(); i++) {
+    const gen = window.__vtOpenGen
+    for (let i = 0; i < 3 && isWatch() && window.__vtOpenGen === gen; i++) {
         pressKey(BACK)
         await sleep(300)
     }
@@ -93,8 +102,9 @@ async function leavePlayer() {
 
 // The native drag (ShellView) awaits this: it resolves once the page has left the player, or after 1.5 s.
 async function leavePlayerAndWait() {
+    const gen = window.__vtOpenGen
     leavePlayer()
-    for (let i = 0; i < 15 && isWatch(); i++) await sleep(100)
+    for (let i = 0; i < 15 && isWatch() && window.__vtOpenGen === gen; i++) await sleep(100)
 }
 
 // Settings, its sub-menus, description and comments open in this stage and shrink the video to the left.
@@ -383,7 +393,7 @@ let postedState = ''
 function postState() {
     const handler = window.webkit?.messageHandlers?.vtState
     if (!handler) return
-    const state = { watch: isWatch(), shorts: isShorts(), sidePanel: sidePanelOpen(), canBack: !isRoot(), touchOwned }
+    const state = { watch: isWatch(), shorts: isShorts(), sidePanel: sidePanelOpen(), canBack: playerOpened() || (globalThis.__vtRole !== 'player' && !isRoot()), touchOwned }
     const key = JSON.stringify(state)
     if (key === postedState) return
     postedState = key
@@ -503,7 +513,7 @@ module.exports = () => {
     if (document.head) disableZoom()
     else document.addEventListener('DOMContentLoaded', disableZoom, { once: true })
 
-    overlayButton('10px', [{ d: 'M15 5l-7 7 7 7' }], back, () => !window.__vtMini && ((isWatch() && overlayVisible()) || isShorts()))
+    overlayButton('10px', [{ d: 'M15 5l-7 7 7 7' }], back, () => !window.__vtMini && ((isWatch() && overlayVisible()) || isShorts() || (playerOpened() && !isWatch())))
     overlayButton('64px', [{ d: 'M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5' }, { d: 'M14 14h7v6h-7z', fill: 'white' }], togglePictureInPicture, () => !window.__vtMini && isWatch() && overlayVisible())
     feedFollowsScroll()
     endScreenTaps()

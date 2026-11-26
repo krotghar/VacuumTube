@@ -2,18 +2,11 @@ import UIKit
 import WebKit
 
 // Swipe down in the player. In the dedicated player page it minimizes the player: the page follows the finger towards the corner
-// and settles there or springs back. In the browsing page (player not ready) it shrinks and slides away and `commit` leaves the player.
+// and settles there or springs back. In the browsing page (player not ready) it shrinks and slides away and leaves the player.
 @MainActor
 final class PlayerDrag: NSObject, UIGestureRecognizerDelegate {
     private static let distance: CGFloat = 140
     private static let velocity: CGFloat = 900
-
-    /// Called once the page is out of sight; `finish(true)` brings it back with a fade, `finish(false)` leaves it to the caller.
-    var commit: (_ shell: ShellView, _ finish: @escaping @MainActor (Bool) -> Void) -> Void = { shell, finish in
-        shell.webView.callAsyncJavaScript("return await window.__vtLeavePlayer?.()", arguments: [:], in: nil, in: .page) { _ in
-            MainActor.assumeIsolated { finish(true) }
-        }
-    }
 
     private weak var shell: ShellView?
     private var running = false
@@ -87,13 +80,12 @@ final class PlayerDrag: NSObject, UIGestureRecognizerDelegate {
             web.transform = CGAffineTransform(translationX: 0, y: shell.bounds.height).scaledBy(x: 0.8, y: 0.8)
             web.alpha = 0
         } completion: { _ in
-            self.commit(shell) { reveal in
-                guard reveal else {
-                    self.running = false
-                    return
+            // The page is out of sight: it leaves the player, then comes back with a fade.
+            shell.webView.callAsyncJavaScript("return await window.__vtLeavePlayer?.()", arguments: [:], in: nil, in: .page) { _ in
+                MainActor.assumeIsolated {
+                    self.reset(web)
+                    UIView.animate(withDuration: 0.2) { web.alpha = 1 } completion: { _ in self.running = false }
                 }
-                self.reset(web)
-                UIView.animate(withDuration: 0.2) { web.alpha = 1 } completion: { _ in self.running = false }
             }
         }
     }

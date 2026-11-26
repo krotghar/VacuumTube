@@ -60,18 +60,31 @@ module.exports = () => {
         return
     }
 
+    // How long the page may take to reach the player before the shell gives up on it (a dialog or toast instead of a video).
+    const WATCH_TIMEOUT_MS = 8000
+
     let opened = false
     let sawWatch = false
+    let openedAt = 0
+    const setOpened = (value) => {
+        opened = value
+        window.__vtOpened = value
+    }
+    window.__vtOpened = false
+    window.__vtOpenGen = 0
 
     window.__vtOpen = (json) => {
-        opened = true
+        setOpened(true)
         sawWatch = false
+        openedAt = Date.now()
+        // A "leave" still running for the previous video must not press Escape in this one.
+        window.__vtOpenGen++
         rcMod.resolveCommand(JSON.parse(json))
     }
 
     const leave = window.__vtLeavePlayer
     window.__vtLeavePlayer = async () => {
-        opened = false
+        setOpened(false)
         await leave?.()
     }
 
@@ -115,8 +128,8 @@ module.exports = () => {
         // The page left the player by itself (not through our close): the native player UI must follow.
         if (!opened) return
         if (isWatch()) sawWatch = true
-        else if (sawWatch) {
-            opened = false
+        else if (sawWatch || Date.now() - openedAt > WATCH_TIMEOUT_MS) {
+            setOpened(false)
             post({ type: 'close' })
         }
     }, 250)
