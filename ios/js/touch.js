@@ -64,10 +64,23 @@ async function backFromShorts() {
 // A remote's Back sometimes only moves focus (e.g. to the search page's own back button); on touch it should leave the page.
 async function back() {
     if (isShorts()) return backFromShorts()
+    if (globalThis.__vtRole === 'player') return backFromPlayer()
     const from = location.hash
     for (let i = 0; i < 3 && location.hash === from && !isRoot(); i++) {
         pressKey(BACK)
         await sleep(300)
+    }
+}
+
+// In the player page "back" hides the panels one by one, then asks the shell to close the player (Escape would leave to Leanback's home).
+async function backFromPlayer() {
+    for (let i = 0; i < 4 && isWatch(); i++) {
+        if (!overlayVisible() && !sidePanelOpen()) {
+            window.webkit?.messageHandlers?.vtRoute?.postMessage({ type: 'close' })
+            return
+        }
+        pressKey(BACK)
+        await sleep(i === 0 && sidePanelOpen() ? 450 : 300)
     }
 }
 

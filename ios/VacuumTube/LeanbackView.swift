@@ -11,7 +11,7 @@ struct LeanbackView: UIViewRepresentable {
         coordinator.attach(webView)
 
         #if DEBUG
-        NSLog("[vt] ua=%@ url=%@", Shell.userAgent, Shell.startURL.absoluteString)
+        NSLog("[vt:browser] ua=%@ url=%@", Shell.userAgent, Shell.startURL.absoluteString)
         #endif
         webView.load(URLRequest(url: Shell.startURL))
         return ShellView(webView: webView, coordinator: coordinator)
@@ -24,6 +24,11 @@ struct LeanbackView: UIViewRepresentable {
         let role: WebViewRole
         var state = PageState()
         weak var webView: WKWebView?
+        /// What the page asked of the shell through `vtRoute`.
+        var onRoute: (@MainActor ([String: Any]) -> Void)?
+        var onDidCommit: (@MainActor () -> Void)?
+        var onDidFinish: (@MainActor () -> Void)?
+        var onTerminate: (@MainActor () -> Void)?
         private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.krotghar.VacuumTube", category: "webview")
         private var terminations: [Date] = []
         private var pendingReload = false
@@ -52,7 +57,7 @@ struct LeanbackView: UIViewRepresentable {
             #endif
         }
 
-        private func reloadPage() {
+        func reloadPage() {
             guard let webView else { return }
             if webView.url != nil { webView.reload() } else { webView.load(URLRequest(url: Shell.startURL)) }
         }
@@ -98,10 +103,14 @@ struct LeanbackView: UIViewRepresentable {
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "vtPlayback" {
                 let playing = (message.body as? Bool) ?? false
-                UIApplication.shared.isIdleTimerDisabled = playing
+                PlaybackTracker.set(role, playing: playing)
                 #if DEBUG
-                NSLog("[vt] idle disabled=%@", String(playing))
+                NSLog("[vt:%@] playing=%@ idle disabled=%@", role.rawValue, String(playing), String(UIApplication.shared.isIdleTimerDisabled))
                 #endif
+                return
+            }
+            if message.name == "vtRoute" {
+                if let body = message.body as? [String: Any] { onRoute?(body) }
                 return
             }
             if message.name == "vtState" {
@@ -109,29 +118,38 @@ struct LeanbackView: UIViewRepresentable {
                 return
             }
             #if DEBUG
-            NSLog("[vt] js %@", String(describing: message.body))
+            NSLog("[vt:%@] js %@", role.rawValue, String(describing: message.body))
             #endif
         }
 
         #if DEBUG
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
             if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse {
-                NSLog("[vt] main frame %ld %@", http.statusCode, http.url?.absoluteString ?? "")
+                NSLog("[vt:%@] main frame %ld %@", role.rawValue, http.statusCode, http.url?.absoluteString ?? "")
             }
             return .allow
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            NSLog("[vt] didFail %@", String(describing: error))
+            NSLog("[vt:%@] didFail %@", role.rawValue, String(describing: error))
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            NSLog("[vt] didFailProvisional %@", String(describing: error))
+            NSLog("[vt:%@] didFailProvisional %@", role.rawValue, String(describing: error))
         }
         #endif
 
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            onDidCommit?()
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            onDidFinish?()
+        }
+
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            UIApplication.shared.isIdleTimerDisabled = false
+            PlaybackTracker.set(role, playing: false)
+            onTerminate?()
             let now = Date()
             terminations = terminations.filter { now.timeIntervalSince($0) < 120 } + [now]
             let reload = terminations.count <= 3
@@ -139,7 +157,8 @@ struct LeanbackView: UIViewRepresentable {
             let route = (url?.fragment).map { String($0.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first ?? "") } ?? "-"
             logger.error("WebContent terminated role=\(self.role.rawValue, privacy: .public) count=\(self.terminations.count, privacy: .public) route=\(route, privacy: .public) reload=\(reload, privacy: .public) url=\(url?.absoluteString ?? "-", privacy: .private)")
             guard reload else {
-                showPlaceholder(in: webView)
+                // The hidden player has nothing to show: it stays unready and videos play in the main page.
+                if role == .browser { showPlaceholder(in: webView) }
                 return
             }
             if UIApplication.shared.applicationState == .active {

@@ -3478,10 +3478,21 @@
       }
       async function back() {
         if (isShorts()) return backFromShorts();
+        if (globalThis.__vtRole === "player") return backFromPlayer();
         const from = location.hash;
         for (let i = 0; i < 3 && location.hash === from && !isRoot(); i++) {
           pressKey(BACK);
           await sleep(300);
+        }
+      }
+      async function backFromPlayer() {
+        for (let i = 0; i < 4 && isWatch(); i++) {
+          if (!overlayVisible() && !sidePanelOpen()) {
+            window.webkit?.messageHandlers?.vtRoute?.postMessage({ type: "close" });
+            return;
+          }
+          pressKey(BACK);
+          await sleep(i === 0 && sidePanelOpen() ? 450 : 300);
         }
       }
       async function leavePlayer() {
@@ -3864,6 +3875,85 @@
     }
   });
 
+  // ios/js/router.js
+  var require_router = __commonJS({
+    "ios/js/router.js"(exports, module) {
+      init_define_VT_LOCALES();
+      var rcMod = require_resolveCommandModifiers();
+      var isWatch = () => location.hash.startsWith("#/watch");
+      function post(message) {
+        try {
+          window.webkit?.messageHandlers?.vtRoute?.postMessage(message);
+        } catch (e) {
+        }
+      }
+      function hasEndpoint(command, keys, depth = 0) {
+        if (!command || typeof command !== "object" || depth > 4) return false;
+        if (keys.some((key) => key in command)) return true;
+        const nested = command.commandExecutorCommand?.commands;
+        return Array.isArray(nested) && nested.some((item) => hasEndpoint(item, keys, depth + 1));
+      }
+      function serialize(command) {
+        try {
+          return JSON.stringify(command);
+        } catch (e) {
+          return null;
+        }
+      }
+      module.exports = () => {
+        if (window.top !== window) return;
+        const role = globalThis.__vtRole;
+        if (role !== "browser" && role !== "player") return;
+        window.__vtExecute = (json) => rcMod.resolveCommand(JSON.parse(json));
+        if (role === "browser") {
+          rcMod.addInputModifier((command) => {
+            if (window.__vtPlayerReady !== true || isWatch() || !hasEndpoint(command, ["watchEndpoint"])) return command;
+            const json = serialize(command);
+            if (!json) return command;
+            post({ type: "open", command: json });
+            return false;
+          });
+          window.addEventListener("hashchange", () => {
+            if (window.__vtPlayerReady === true && isWatch()) post({ type: "log", text: "browser opened " + location.hash });
+          });
+          return;
+        }
+        let opened = false;
+        let sawWatch = false;
+        window.__vtOpen = (json) => {
+          opened = true;
+          sawWatch = false;
+          rcMod.resolveCommand(JSON.parse(json));
+        };
+        const leave = window.__vtLeavePlayer;
+        window.__vtLeavePlayer = async () => {
+          opened = false;
+          await leave?.();
+        };
+        rcMod.addInputModifier((command) => {
+          if (!opened || !isWatch() || !hasEndpoint(command, ["browseEndpoint", "searchEndpoint"])) return command;
+          const json = serialize(command);
+          if (!json) return command;
+          post({ type: "forward", command: json });
+          return false;
+        });
+        let ready = false;
+        setInterval(() => {
+          if (!ready && Object.values(window._yttv ?? {}).some((entry) => typeof entry?.instance?.resolveCommand === "function")) {
+            ready = true;
+            post({ type: "ready" });
+          }
+          if (!opened) return;
+          if (isWatch()) sawWatch = true;
+          else if (sawWatch) {
+            opened = false;
+            post({ type: "close" });
+          }
+        }, 250);
+      };
+    }
+  });
+
   // ios/js/playback-state.js
   var require_playback_state = __commonJS({
     "ios/js/playback-state.js"(exports, module) {
@@ -4038,6 +4128,7 @@ ytlr-section-list-renderer > yt-virtual-list { height: calc(100vh - 6.75rem) !im
       require_equal_shelves(),
       require_no_autoplay(),
       require_touch(),
+      require_router(),
       require_playback_state(),
       require_playback_speed(),
       require_fill_4x3()

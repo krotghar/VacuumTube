@@ -2,6 +2,7 @@ import WebKit
 
 enum WebViewRole: String {
     case browser
+    case player
 }
 
 @MainActor
@@ -16,6 +17,7 @@ enum WebViewFactory {
         let content = config.userContentController
         content.add(coordinator, name: "vtPlayback")
         content.add(coordinator, name: "vtState")
+        content.add(coordinator, name: "vtRoute")
         content.addScriptMessageHandler(SponsorFetch(), contentWorld: .page, name: "vtFetch")
         #if DEBUG
         content.add(coordinator, name: "vt")
@@ -29,7 +31,11 @@ enum WebViewFactory {
         ))
         #endif
         // The shell drags the page itself on a swipe down; touch.js then leaves that gesture alone.
-        content.addUserScript(WKUserScript(source: "window.__vtNativeDrag = true", injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        content.addUserScript(WKUserScript(
+            source: "globalThis.__vtRole = '\(role.rawValue)'; globalThis.__vtNativeDrag = true",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         content.addUserScript(bundledScript("leanback-bundle", mainFrameOnly: false))
         #if DEBUG
         if let injected = Shell.injectedScript {

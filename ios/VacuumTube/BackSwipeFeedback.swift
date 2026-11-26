@@ -65,34 +65,34 @@ final class BackSwipeFeedback: NSObject {
         indicator.alpha = canBack ? p : p / 0.4 * 0.7
         indicator.transform = p >= 1 ? CGAffineTransform(scaleX: 1.1, y: 1.1) : .identity
         guard canBack else { return }
-        let web = shell.webView
+        let web = shell.frontWebView
         web.layer.masksToBounds = true
         web.layer.cornerRadius = 16 * p
         web.transform = CGAffineTransform(translationX: -16 * p, y: 0).scaledBy(x: 1 - 0.05 * p, y: 1 - 0.05 * p)
     }
 
     private func complete(in shell: ShellView) {
-        shell.webView.evaluateJavaScript("window.__vtBack?.()")
+        shell.frontWebView.evaluateJavaScript("window.__vtBack?.()")
         UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
             self.indicator.transform = CGAffineTransform(scaleX: 1.3, y: 1.3)
             self.indicator.alpha = 0
         }
         UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
-            shell.webView.transform = .identity
-            shell.webView.layer.cornerRadius = 0
+            shell.frontWebView.transform = .identity
+            shell.frontWebView.layer.cornerRadius = 0
         } completion: { _ in
-            shell.webView.layer.masksToBounds = false
+            shell.frontWebView.layer.masksToBounds = false
         }
     }
 
     private func cancel(in shell: ShellView) {
         UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0, options: []) {
-            shell.webView.transform = .identity
-            shell.webView.layer.cornerRadius = 0
+            shell.frontWebView.transform = .identity
+            shell.frontWebView.layer.cornerRadius = 0
             self.indicator.alpha = 0
             self.indicator.center.x = shell.bounds.maxX
         } completion: { _ in
-            shell.webView.layer.masksToBounds = false
+            shell.frontWebView.layer.masksToBounds = false
         }
     }
 }
