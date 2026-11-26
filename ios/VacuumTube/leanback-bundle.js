@@ -3334,6 +3334,36 @@
     }
   });
 
+  // ios/js/equal-shelves.js
+  var require_equal_shelves = __commonJS({
+    "ios/js/equal-shelves.js"(exports, module) {
+      init_define_VT_LOCALES();
+      var jsonModifiers = require_jsonModifiers();
+      var MAX_DEPTH = 40;
+      function stripEnlarge(node, depth = 0) {
+        if (!node || typeof node !== "object" || depth > MAX_DEPTH) return;
+        if (Array.isArray(node)) {
+          for (const item of node) stripEnlarge(item, depth + 1);
+          return;
+        }
+        const effects = node.shelfRenderer?.tvhtml5Style?.effects;
+        if (effects && "enlarge" in effects) {
+          delete effects.enlarge;
+          window.__vtEnlargeStripped++;
+        }
+        for (const key in node) stripEnlarge(node[key], depth + 1);
+      }
+      module.exports = () => {
+        if (window.top !== window) return;
+        window.__vtEnlargeStripped = 0;
+        jsonModifiers.addModifier((json) => {
+          if (json.contents || json.continuationContents || json.onResponseReceivedActions) stripEnlarge(json);
+          return json;
+        });
+      };
+    }
+  });
+
   // ios/js/touch.js
   var require_touch = __commonJS({
     "ios/js/touch.js"(exports, module) {
@@ -3804,6 +3834,7 @@ ytlr-section-list-renderer > yt-virtual-list { height: calc(100vh - 6.75rem) !im
       require_sponsor_fetch(),
       require_sponsorblock(),
       require_touch_support(),
+      require_equal_shelves(),
       require_touch(),
       require_playback_state(),
       require_fill_4x3()

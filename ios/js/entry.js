@@ -8,6 +8,7 @@ if (location.host === 'www.youtube.com' && location.pathname === '/tv') {
         require('./sponsor-fetch'),
         require('../../src/preload/modules/sponsorblock'),
         require('../../src/preload/modules/touch-support'),
+        require('./equal-shelves'),
         require('./touch'),
         require('./playback-state'),
         require('./fill-4x3')
