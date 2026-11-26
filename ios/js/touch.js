@@ -96,21 +96,21 @@ function seek(x) {
     showSeekHint(seconds)
 }
 
-// Vertical lists are virtual: Leanback renders a window of shelves around the focused one and fetches more only when focus
-// reaches the last shelf. A finger scroll does not move focus, so at the bottom we walk focus down to the last rendered shelf.
-function backButton() {
+function overlayButton(left, paths, onTap) {
     const button = document.createElement('div')
     // innerHTML is blocked by the page's Trusted Types policy.
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
     for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', width: '24', height: '24', fill: 'none', stroke: 'white', 'stroke-width': '2.2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) {
         svg.setAttribute(name, value)
     }
-    path.setAttribute('d', 'M15 5l-7 7 7 7')
-    svg.appendChild(path)
+    for (const attrs of paths) {
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+        for (const [name, value] of Object.entries(attrs)) path.setAttribute(name, value)
+        svg.appendChild(path)
+    }
     button.appendChild(svg)
     Object.assign(button.style, {
-        position: 'fixed', top: '10px', left: '10px', width: '44px', height: '44px', zIndex: '9999',
+        position: 'fixed', top: '10px', left, width: '44px', height: '44px', zIndex: '9999',
         display: 'none', alignItems: 'center', justifyContent: 'center',
         borderRadius: '50%', background: 'rgba(0, 0, 0, 0.5)'
     })
@@ -119,7 +119,7 @@ function backButton() {
         window.addEventListener(type, (e) => {
             if (e.target !== button && !button.contains(e.target)) return
             e.stopImmediatePropagation()
-            if (type === 'pointerup') back()
+            if (type === 'pointerup') onTap()
         }, true)
     }
 
@@ -130,6 +130,15 @@ function backButton() {
     }, 250)
 }
 
+// WebKit pauses inline video when the app goes to the background; playback in PiP keeps going.
+function togglePictureInPicture() {
+    const video = document.querySelector('video')
+    if (!video?.webkitSetPresentationMode) return
+    video.webkitSetPresentationMode(video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture')
+}
+
+// Vertical lists are virtual: Leanback renders a window of shelves around the focused one and fetches more only when focus
+// reaches the last shelf. A finger scroll does not move focus, so at the bottom we walk focus down to the last rendered shelf.
 function feedFollowsScroll() {
     const SELECTOR = 'ytlr-section-list-renderer > yt-virtual-list'
     let timer = null
@@ -246,7 +255,8 @@ module.exports = () => {
     if (document.head) disableZoom()
     else document.addEventListener('DOMContentLoaded', disableZoom, { once: true })
 
-    backButton()
+    overlayButton('10px', [{ d: 'M15 5l-7 7 7 7' }], back)
+    overlayButton('64px', [{ d: 'M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5' }, { d: 'M14 14h7v6h-7z', fill: 'white' }], togglePictureInPicture)
     feedFollowsScroll()
     playerGestures()
 }

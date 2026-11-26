@@ -1,16 +1,19 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     // A scene session saved by the earlier SwiftUI build comes back with SwiftUI's own delegate and stays black; take it over.
+    // Only app windows: starting PiP connects a system scene that must keep its own delegate.
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         NotificationCenter.default.addObserver(self, selector: #selector(sceneWillConnect(_:)), name: UIScene.willConnectNotification, object: nil)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         return true
     }
 
     @objc private func sceneWillConnect(_ note: Notification) {
-        guard let scene = note.object as? UIWindowScene, !(scene.delegate is SceneDelegate) else { return }
+        guard let scene = note.object as? UIWindowScene, scene.session.role == .windowApplication, !(scene.delegate is SceneDelegate) else { return }
         let delegate = SceneDelegate()
         scene.delegate = delegate
         delegate.attach(to: scene)

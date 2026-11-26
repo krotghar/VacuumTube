@@ -623,20 +623,22 @@
         player()?.seekBy(seconds);
         showSeekHint(seconds);
       }
-      function backButton() {
+      function overlayButton(left, paths, onTap) {
         const button = document.createElement("div");
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", width: "24", height: "24", fill: "none", stroke: "white", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round" })) {
           svg.setAttribute(name, value);
         }
-        path.setAttribute("d", "M15 5l-7 7 7 7");
-        svg.appendChild(path);
+        for (const attrs of paths) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          for (const [name, value] of Object.entries(attrs)) path.setAttribute(name, value);
+          svg.appendChild(path);
+        }
         button.appendChild(svg);
         Object.assign(button.style, {
           position: "fixed",
           top: "10px",
-          left: "10px",
+          left,
           width: "44px",
           height: "44px",
           zIndex: "9999",
@@ -650,13 +652,18 @@
           window.addEventListener(type, (e) => {
             if (e.target !== button && !button.contains(e.target)) return;
             e.stopImmediatePropagation();
-            if (type === "pointerup") back();
+            if (type === "pointerup") onTap();
           }, true);
         }
         setInterval(() => {
           if (!button.isConnected && document.body) document.body.appendChild(button);
           button.style.display = isWatch() && overlayVisible() ? "flex" : "none";
         }, 250);
+      }
+      function togglePictureInPicture() {
+        const video = document.querySelector("video");
+        if (!video?.webkitSetPresentationMode) return;
+        video.webkitSetPresentationMode(video.webkitPresentationMode === "picture-in-picture" ? "inline" : "picture-in-picture");
       }
       function feedFollowsScroll() {
         const SELECTOR = "ytlr-section-list-renderer > yt-virtual-list";
@@ -756,7 +763,8 @@
         window.__vtBack = back;
         if (document.head) disableZoom();
         else document.addEventListener("DOMContentLoaded", disableZoom, { once: true });
-        backButton();
+        overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back);
+        overlayButton("64px", [{ d: "M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" }, { d: "M14 14h7v6h-7z", fill: "white" }], togglePictureInPicture);
         feedFollowsScroll();
         playerGestures();
       };
