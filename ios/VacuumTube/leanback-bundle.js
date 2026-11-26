@@ -3490,6 +3490,10 @@
           await sleep(300);
         }
       }
+      async function leavePlayerAndWait() {
+        leavePlayer();
+        for (let i = 0; i < 15 && isWatch(); i++) await sleep(100);
+      }
       var sidePanelOpen = () => !!document.querySelector("yt-unified-overlay-stage ytlr-animated-overlay");
       async function closeSidePanels() {
         for (let i = 0; i < 3 && sidePanelOpen(); i++) {
@@ -3749,6 +3753,23 @@
           setTimeout(() => playNext(block), 100);
         }, true);
       }
+      var touchOwned = false;
+      var postedState = "";
+      function postState() {
+        const handler = window.webkit?.messageHandlers?.vtState;
+        if (!handler) return;
+        const state = { watch: isWatch(), shorts: isShorts(), sidePanel: sidePanelOpen(), canBack: !isRoot(), touchOwned };
+        const key = JSON.stringify(state);
+        if (key === postedState) return;
+        postedState = key;
+        handler.postMessage(state);
+      }
+      function stateReporting() {
+        window.addEventListener("hashchange", postState);
+        document.addEventListener("focusin", postState, true);
+        setInterval(postState, 250);
+        postState();
+      }
       function playerGestures() {
         let start = null;
         let swallow = false;
@@ -3756,24 +3777,32 @@
         let seeking = 0;
         let singleTimer = null;
         const owned = (e) => e.pointerType === "touch" && isWatch() && !!e.target.closest?.("ytlr-watch-default") && !e.target.closest(INTERACTIVE);
+        const setTouchOwned = (value) => {
+          touchOwned = value;
+          postState();
+        };
         window.addEventListener("pointerdown", (e) => {
           if (!owned(e)) {
             start = null;
             swallow = false;
+            setTouchOwned(false);
             return;
           }
           start = { x: e.clientX, y: e.clientY, id: e.pointerId };
           swallow = true;
+          setTouchOwned(true);
           e.stopPropagation();
         }, true);
         for (const type of ["pointermove", "pointercancel", "mousedown", "mousemove", "mouseup", "click"]) {
           window.addEventListener(type, (e) => {
+            if (type === "pointercancel") setTouchOwned(false);
             if (!swallow) return;
             e.stopPropagation();
             if (type === "pointercancel") start = null;
           }, true);
         }
         window.addEventListener("pointerup", (e) => {
+          setTouchOwned(false);
           if (!swallow) return;
           e.stopPropagation();
           setTimeout(() => swallow = false, 400);
@@ -3784,7 +3813,7 @@
           if (Math.abs(dy) > SWIPE_MIN && Math.abs(dy) > 2 * Math.abs(dx)) {
             clearTimeout(singleTimer);
             lastTap = null;
-            if (dy > 0) leavePlayer();
+            if (dy > 0 && window.__vtNativeDrag !== true) leavePlayer();
             return;
           }
           if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) return;
@@ -3821,6 +3850,7 @@
         ytlr-squeezeback-player-overlay yt-focus-container:has(ytlr-progress-bar) { top: auto !important; bottom: 2rem !important; }
     `);
         window.__vtBack = back;
+        window.__vtLeavePlayer = leavePlayerAndWait;
         if (document.head) disableZoom();
         else document.addEventListener("DOMContentLoaded", disableZoom, { once: true });
         overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back, () => isWatch() && overlayVisible() || isShorts());
@@ -3829,6 +3859,7 @@
         endScreenTaps();
         playerGestures();
         shortsGestures();
+        stateReporting();
       };
     }
   });

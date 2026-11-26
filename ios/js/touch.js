@@ -78,6 +78,12 @@ async function leavePlayer() {
     }
 }
 
+// The native drag (ShellView) awaits this: it resolves once the page has left the player, or after 1.5 s.
+async function leavePlayerAndWait() {
+    leavePlayer()
+    for (let i = 0; i < 15 && isWatch(); i++) await sleep(100)
+}
+
 // Settings, its sub-menus, description and comments open in this stage and shrink the video to the left.
 const sidePanelOpen = () => !!document.querySelector('yt-unified-overlay-stage ytlr-animated-overlay')
 
@@ -357,6 +363,27 @@ function endScreenTaps() {
     }, true)
 }
 
+// The native side follows the finger on a swipe down; it needs to know the state of the page and whether the touch is ours.
+let touchOwned = false
+let postedState = ''
+
+function postState() {
+    const handler = window.webkit?.messageHandlers?.vtState
+    if (!handler) return
+    const state = { watch: isWatch(), shorts: isShorts(), sidePanel: sidePanelOpen(), canBack: !isRoot(), touchOwned }
+    const key = JSON.stringify(state)
+    if (key === postedState) return
+    postedState = key
+    handler.postMessage(state)
+}
+
+function stateReporting() {
+    window.addEventListener('hashchange', postState)
+    document.addEventListener('focusin', postState, true)
+    setInterval(postState, 250)
+    postState()
+}
+
 function playerGestures() {
     let start = null
     let swallow = false
@@ -367,19 +394,27 @@ function playerGestures() {
     const owned = (e) => e.pointerType === 'touch' && isWatch() &&
         !!e.target.closest?.('ytlr-watch-default') && !e.target.closest(INTERACTIVE)
 
+    const setTouchOwned = (value) => {
+        touchOwned = value
+        postState()
+    }
+
     window.addEventListener('pointerdown', (e) => {
         if (!owned(e)) {
             start = null
             swallow = false
+            setTouchOwned(false)
             return
         }
         start = { x: e.clientX, y: e.clientY, id: e.pointerId }
         swallow = true
+        setTouchOwned(true)
         e.stopPropagation()
     }, true)
 
     for (const type of ['pointermove', 'pointercancel', 'mousedown', 'mousemove', 'mouseup', 'click']) {
         window.addEventListener(type, (e) => {
+            if (type === 'pointercancel') setTouchOwned(false)
             if (!swallow) return
             e.stopPropagation()
             if (type === 'pointercancel') start = null
@@ -387,6 +422,7 @@ function playerGestures() {
     }
 
     window.addEventListener('pointerup', (e) => {
+        setTouchOwned(false)
         if (!swallow) return
         e.stopPropagation()
         setTimeout(() => swallow = false, 400)
@@ -399,7 +435,8 @@ function playerGestures() {
         if (Math.abs(dy) > SWIPE_MIN && Math.abs(dy) > 2 * Math.abs(dx)) {
             clearTimeout(singleTimer)
             lastTap = null
-            if (dy > 0) leavePlayer()
+            // With the native drag the shell follows the finger and asks for the exit itself.
+            if (dy > 0 && window.__vtNativeDrag !== true) leavePlayer()
             return
         }
         if (Math.abs(dx) > TAP_SLOP || Math.abs(dy) > TAP_SLOP) return
@@ -441,6 +478,7 @@ module.exports = () => {
     `)
 
     window.__vtBack = back
+    window.__vtLeavePlayer = leavePlayerAndWait
 
     if (document.head) disableZoom()
     else document.addEventListener('DOMContentLoaded', disableZoom, { once: true })
@@ -451,4 +489,5 @@ module.exports = () => {
     endScreenTaps()
     playerGestures()
     shortsGestures()
+    stateReporting()
 }
