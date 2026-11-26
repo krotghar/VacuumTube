@@ -16,13 +16,13 @@ struct LeanbackView: UIViewRepresentable {
         #if DEBUG
         content.add(context.coordinator, name: "vt")
         content.addUserScript(Self.bundledScript("debug-probe", mainFrameOnly: true))
-        if Shell.allowAV1 {
-            content.addUserScript(WKUserScript(
-                source: "globalThis.__vtConfigOverrides = {h264ify_disable_av1: false}",
-                injectionTime: .atDocumentStart,
-                forMainFrameOnly: false
-            ))
-        }
+        #endif
+        #if targetEnvironment(simulator)
+        content.addUserScript(WKUserScript(
+            source: "globalThis.__vtConfigOverrides = {h264ify_disable_av1: true}",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        ))
         #endif
         content.addUserScript(Self.bundledScript("leanback-bundle", mainFrameOnly: false))
         #if DEBUG
@@ -46,7 +46,7 @@ struct LeanbackView: UIViewRepresentable {
         context.coordinator.attach(webView)
 
         #if DEBUG
-        NSLog("[vt] ua=%@ allowAV1=%@ url=%@", Shell.userAgent, String(Shell.allowAV1), Shell.startURL.absoluteString)
+        NSLog("[vt] ua=%@ url=%@", Shell.userAgent, Shell.startURL.absoluteString)
         #endif
         webView.load(URLRequest(url: Shell.startURL))
         return webView

@@ -12,10 +12,9 @@ enum Shell {
     static let backgroundColor = UIColor(red: 0x28 / 255, green: 0x28 / 255, blue: 0x28 / 255, alpha: 1)
 
     #if DEBUG
-    // Debug-only launch arguments: `-ua "..." -url https://... -vtAllowAV1 YES`.
+    // Debug-only launch arguments: `-ua "..." -url https://...`.
     static var userAgent: String { UserDefaults.standard.string(forKey: "ua") ?? cobaltUserAgent }
     static var startURL: URL { URL(string: UserDefaults.standard.string(forKey: "url") ?? "https://www.youtube.com/tv")! }
-    static var allowAV1: Bool { UserDefaults.standard.bool(forKey: "vtAllowAV1") }
 
     // Documents/inject.js, if present, runs at document start (for trying upstream modules without rebuilding).
     static var injectedScript: String? {
