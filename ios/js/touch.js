@@ -126,8 +126,7 @@ function backButton() {
     // Leanback rebuilds <body> while booting, so re-attach whenever the button is gone.
     setInterval(() => {
         if (!button.isConnected && document.body) document.body.appendChild(button)
-        const visible = !isRoot() && (!isWatch() || overlayVisible())
-        button.style.display = visible ? 'flex' : 'none'
+        button.style.display = isWatch() && overlayVisible() ? 'flex' : 'none'
     }, 250)
 }
 
