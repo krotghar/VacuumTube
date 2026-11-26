@@ -3773,6 +3773,91 @@
     }
   });
 
+  // ios/js/playback-speed.js
+  var require_playback_speed = __commonJS({
+    "ios/js/playback-speed.js"(exports, module) {
+      init_define_VT_LOCALES();
+      var KEY = "vt.playbackRate";
+      var MIN_RATE = 0.25;
+      var MAX_RATE = 2;
+      var OWN_CHANGE_MS = 1e3;
+      var VERIFY_MS = 3e3;
+      var MAX_RETRIES = 2;
+      var clamp = (rate) => Math.min(MAX_RATE, Math.max(MIN_RATE, rate));
+      var isWatch = () => location.hash.startsWith("#/watch");
+      var player = () => document.querySelector(".html5-video-player");
+      var settingsOpen = () => !!document.querySelector("yt-unified-overlay-stage ytlr-animated-overlay");
+      function savedRate() {
+        try {
+          const rate = parseFloat(localStorage.getItem(KEY));
+          return Number.isFinite(rate) ? clamp(rate) : null;
+        } catch (e) {
+          return null;
+        }
+      }
+      function saveRate(rate) {
+        try {
+          localStorage.setItem(KEY, String(rate));
+        } catch (e) {
+        }
+      }
+      module.exports = () => {
+        if (window.top !== window) return;
+        let appliedFor = null;
+        let ownChangeAt = 0;
+        function apply(retries) {
+          const p = player();
+          const saved = savedRate();
+          if (!p || saved === null || !isWatch() || p.getVideoData?.().isLive) return;
+          if (Math.abs(p.getPlaybackRate() - saved) > 1e-3) {
+            ownChangeAt = Date.now();
+            try {
+              p.setPlaybackRate(saved);
+            } catch (e) {
+              return;
+            }
+          }
+          if (retries < MAX_RETRIES) {
+            const id = appliedFor;
+            setTimeout(() => {
+              const current = player();
+              if (appliedFor !== id || !current || !isWatch()) return;
+              if (Math.abs(current.getPlaybackRate() - saved) > 1e-3 && savedRate() === saved) apply(retries + 1);
+            }, VERIFY_MS);
+          }
+        }
+        function resetOutsideWatch() {
+          const p = player();
+          if (!p || p.getPlaybackRate() === 1) return;
+          ownChangeAt = Date.now();
+          try {
+            p.setPlaybackRate(1);
+          } catch (e) {
+          }
+        }
+        document.addEventListener("playing", () => {
+          if (!isWatch()) {
+            appliedFor = null;
+            if (savedRate() !== null) resetOutsideWatch();
+            return;
+          }
+          const id = player()?.getVideoData?.().video_id;
+          if (!id || id === appliedFor) return;
+          appliedFor = id;
+          apply(0);
+        }, true);
+        document.addEventListener("emptied", () => {
+          appliedFor = null;
+        }, true);
+        document.addEventListener("ratechange", () => {
+          if (!isWatch() || !settingsOpen() || Date.now() - ownChangeAt < OWN_CHANGE_MS) return;
+          const rate = player()?.getPlaybackRate?.();
+          if (typeof rate === "number" && rate > 0) saveRate(clamp(rate));
+        }, true);
+      };
+    }
+  });
+
   // ios/js/fill-4x3.js
   var require_fill_4x3 = __commonJS({
     "ios/js/fill-4x3.js"(exports, module) {
@@ -3837,6 +3922,7 @@ ytlr-section-list-renderer > yt-virtual-list { height: calc(100vh - 6.75rem) !im
       require_equal_shelves(),
       require_touch(),
       require_playback_state(),
+      require_playback_speed(),
       require_fill_4x3()
     ];
     for (const module of modules) {

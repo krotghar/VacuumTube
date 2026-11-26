@@ -11,6 +11,7 @@ if (location.host === 'www.youtube.com' && location.pathname === '/tv') {
         require('./equal-shelves'),
         require('./touch'),
         require('./playback-state'),
+        require('./playback-speed'),
         require('./fill-4x3')
     ]
 
