@@ -3364,6 +3364,69 @@
     }
   });
 
+  // ios/js/no-autoplay.js
+  var require_no_autoplay = __commonJS({
+    "ios/js/no-autoplay.js"(exports, module) {
+      init_define_VT_LOCALES();
+      var jsonModifiers = require_jsonModifiers();
+      function addEndScreen(overlay, autoplay) {
+        const set = autoplay?.sets?.find((item) => item.mode === "NORMAL") ?? autoplay?.sets?.[0];
+        const endpoint = set?.autoplayVideoRenderer?.autonavEndpointRenderer?.endpoint;
+        const preview = set?.nextVideoRenderer?.maybeHistoryEndpointRenderer?.item?.previewButtonRenderer;
+        if (!overlay.autoplay && endpoint?.watchEndpoint && preview) {
+          overlay.autoplay = {
+            playerOverlayAutoplayRenderer: {
+              title: autoplay.title,
+              videoTitle: preview.title,
+              byline: preview.byline,
+              cancelText: { simpleText: "Cancel" },
+              pauseText: { simpleText: "Auto-play is paused" },
+              background: preview.thumbnail,
+              countDownSecs: autoplay.countDownSecs,
+              nextButton: {
+                buttonRenderer: {
+                  isDisabled: false,
+                  icon: { iconType: "PLAYING" },
+                  navigationEndpoint: endpoint,
+                  accessibility: { label: "Play next video" },
+                  accessibilityData: { accessibilityData: { label: "Play next video" } }
+                }
+              },
+              preferImmediateRedirect: false,
+              videoId: endpoint.watchEndpoint.videoId
+            }
+          };
+        }
+        const replay = autoplay?.replayVideoRenderer?.pivotVideoRenderer;
+        if (!overlay.replay && replay?.navigationEndpoint) {
+          overlay.replay = {
+            playerOverlayReplayRenderer: {
+              background: replay.thumbnail,
+              overlayIcon: replay.overlayIcon,
+              overlayLabel: replay.overlayLabel,
+              navigationEndpoint: replay.navigationEndpoint,
+              shortBylineText: replay.shortBylineText,
+              title: replay.title
+            }
+          };
+        }
+      }
+      module.exports = () => {
+        if (window.top !== window) return;
+        jsonModifiers.addModifier((json) => {
+          const overlay = json.playerOverlays?.playerOverlayRenderer;
+          if (!overlay) return json;
+          overlay.isAutoplayEnabled = false;
+          if (Array.isArray(overlay.timelyActionRenderers)) {
+            overlay.timelyActionRenderers = overlay.timelyActionRenderers.filter((item) => !JSON.stringify(item).includes("upNextCountdownViewModel"));
+          }
+          addEndScreen(overlay, json.contents?.singleColumnWatchNextResults?.autoplay?.autoplay);
+          return json;
+        });
+      };
+    }
+  });
+
   // ios/js/touch.js
   var require_touch = __commonJS({
     "ios/js/touch.js"(exports, module) {
@@ -3376,7 +3439,7 @@
       var SWIPE_MIN = 80;
       var DOUBLE_TAP_MS = 280;
       var SEEK_SECONDS = 10;
-      var INTERACTIVE = "yt-button-container, ytlr-button, ytlr-progress-bar, ytlr-tile-renderer, yt-lockup-view-model, button";
+      var INTERACTIVE = "yt-button-container, ytlr-button, ytlr-progress-bar, ytlr-tile-renderer, yt-lockup-view-model, button, ytlr-player-overlay-renderer, ytlr-endscreen-element-renderer";
       var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       function pressKey(keyCode) {
         for (const type of ["keydown", "keyup"]) {
@@ -3387,9 +3450,10 @@
       }
       var isWatch = () => location.hash.startsWith("#/watch");
       var player = () => document.querySelector(".html5-video-player");
+      var END_SCREEN = "ytlr-player-overlay-renderer, ytlr-timely-action-renderer, ytlr-endscreen-renderer";
       function overlayVisible() {
         const active = document.activeElement;
-        return !!active && active.tagName !== "YT-FOCUS-CONTAINER" && !!active.closest("ytlr-squeezeback-player-overlay");
+        return !!active && active.tagName !== "YT-FOCUS-CONTAINER" && !!active.closest("ytlr-squeezeback-player-overlay") && !active.closest(END_SCREEN);
       }
       function disableZoom() {
         const meta = document.createElement("meta");
@@ -3665,6 +3729,26 @@
           if (swallow && e.cancelable) e.preventDefault();
         }, { capture: true, passive: false });
       }
+      function endScreenTaps() {
+        const AUTOPLAY = "ytlr-player-overlay-autoplay-renderer";
+        let busy = false;
+        async function playNext(block) {
+          busy = true;
+          for (let i = 0; i < 3 && block.isConnected && isWatch(); i++) {
+            const onButton = !!document.activeElement?.closest(`${AUTOPLAY} yt-button-container`);
+            pressKey(ENTER);
+            if (onButton) break;
+            await sleep(150);
+          }
+          busy = false;
+        }
+        window.addEventListener("pointerup", (e) => {
+          if (busy || e.pointerType !== "touch" || !isWatch()) return;
+          const block = e.target.closest?.(AUTOPLAY);
+          if (!block || e.target.closest("ytlr-button, yt-button-container, button")) return;
+          setTimeout(() => playNext(block), 100);
+        }, true);
+      }
       function playerGestures() {
         let start = null;
         let swallow = false;
@@ -3742,6 +3826,7 @@
         overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back, () => isWatch() && overlayVisible() || isShorts());
         overlayButton("64px", [{ d: "M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" }, { d: "M14 14h7v6h-7z", fill: "white" }], togglePictureInPicture, () => isWatch() && overlayVisible());
         feedFollowsScroll();
+        endScreenTaps();
         playerGestures();
         shortsGestures();
       };
@@ -3920,6 +4005,7 @@ ytlr-section-list-renderer > yt-virtual-list { height: calc(100vh - 6.75rem) !im
       require_sponsorblock(),
       require_touch_support(),
       require_equal_shelves(),
+      require_no_autoplay(),
       require_touch(),
       require_playback_state(),
       require_playback_speed(),

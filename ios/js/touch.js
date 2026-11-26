@@ -10,7 +10,7 @@ const SWIPE_MIN = 80
 const DOUBLE_TAP_MS = 280
 const SEEK_SECONDS = 10
 
-const INTERACTIVE = 'yt-button-container, ytlr-button, ytlr-progress-bar, ytlr-tile-renderer, yt-lockup-view-model, button'
+const INTERACTIVE = 'yt-button-container, ytlr-button, ytlr-progress-bar, ytlr-tile-renderer, yt-lockup-view-model, button, ytlr-player-overlay-renderer, ytlr-endscreen-element-renderer'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -25,9 +25,12 @@ function pressKey(keyCode) {
 const isWatch = () => location.hash.startsWith('#/watch')
 const player = () => document.querySelector('.html5-video-player')
 
+// The end screens ("UP NEXT", "Next in N", the author's cards) live in the same overlay but are not the player panel.
+const END_SCREEN = 'ytlr-player-overlay-renderer, ytlr-timely-action-renderer, ytlr-endscreen-renderer'
+
 function overlayVisible() {
     const active = document.activeElement
-    return !!active && active.tagName !== 'YT-FOCUS-CONTAINER' && !!active.closest('ytlr-squeezeback-player-overlay')
+    return !!active && active.tagName !== 'YT-FOCUS-CONTAINER' && !!active.closest('ytlr-squeezeback-player-overlay') && !active.closest(END_SCREEN)
 }
 
 function disableZoom() {
@@ -329,6 +332,31 @@ function shortsGestures() {
     }, { capture: true, passive: false })
 }
 
+// A tap on the next video's preview or title on "UP NEXT" only moves Leanback's focus to the block; the first Enter then
+// goes to the play button and the second one opens the video, so the tap does both.
+function endScreenTaps() {
+    const AUTOPLAY = 'ytlr-player-overlay-autoplay-renderer'
+    let busy = false
+
+    async function playNext(block) {
+        busy = true
+        for (let i = 0; i < 3 && block.isConnected && isWatch(); i++) {
+            const onButton = !!document.activeElement?.closest(`${AUTOPLAY} yt-button-container`)
+            pressKey(ENTER)
+            if (onButton) break
+            await sleep(150)
+        }
+        busy = false
+    }
+
+    window.addEventListener('pointerup', (e) => {
+        if (busy || e.pointerType !== 'touch' || !isWatch()) return
+        const block = e.target.closest?.(AUTOPLAY)
+        if (!block || e.target.closest('ytlr-button, yt-button-container, button')) return
+        setTimeout(() => playNext(block), 100)
+    }, true)
+}
+
 function playerGestures() {
     let start = null
     let swallow = false
@@ -420,6 +448,7 @@ module.exports = () => {
     overlayButton('10px', [{ d: 'M15 5l-7 7 7 7' }], back, () => (isWatch() && overlayVisible()) || isShorts())
     overlayButton('64px', [{ d: 'M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5' }, { d: 'M14 14h7v6h-7z', fill: 'white' }], togglePictureInPicture, () => isWatch() && overlayVisible())
     feedFollowsScroll()
+    endScreenTaps()
     playerGestures()
     shortsGestures()
 }
