@@ -3367,8 +3367,23 @@
         meta.content = "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no";
         document.head.appendChild(meta);
       }
-      var isRoot = () => location.hash === "" || location.hash === "#/";
+      var shortsPage = () => [...document.querySelectorAll("ytlr-shorts-page")].find((page) => page.getBoundingClientRect().width > 0);
+      var isShorts = () => !!shortsPage();
+      var isRoot = () => (location.hash === "" || location.hash === "#/") && !isShorts();
+      var LEFT = 37;
+      var ENTER = 13;
+      async function backFromShorts() {
+        const railOpen = () => (document.querySelector("ytlr-guide-response")?.getBoundingClientRect().width ?? 0) > 200;
+        pressKey(BACK);
+        for (let i = 0; i < 8 && isShorts() && !railOpen(); i++) await sleep(100);
+        if (!railOpen()) return;
+        for (let i = 0; i < 8 && !document.activeElement?.closest("ytlr-guide-response"); i++) await sleep(100);
+        pressKey(UP);
+        await sleep(300);
+        if (document.activeElement?.closest("ytlr-guide-entry-renderer")) pressKey(ENTER);
+      }
       async function back() {
+        if (isShorts()) return backFromShorts();
         const from = location.hash;
         for (let i = 0; i < 3 && location.hash === from && !isRoot(); i++) {
           pressKey(BACK);
@@ -3435,7 +3450,7 @@
         player()?.seekBy(seconds);
         showSeekHint(seconds);
       }
-      function overlayButton(left, paths, onTap) {
+      function overlayButton(left, paths, onTap, visible) {
         const button = document.createElement("div");
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", width: "24", height: "24", fill: "none", stroke: "white", "stroke-width": "2.2", "stroke-linecap": "round", "stroke-linejoin": "round" })) {
@@ -3464,12 +3479,16 @@
           window.addEventListener(type, (e) => {
             if (e.target !== button && !button.contains(e.target)) return;
             e.stopImmediatePropagation();
+            if ((type === "pointerdown" || type === "mousedown") && e.cancelable) e.preventDefault();
             if (type === "pointerup") onTap();
           }, true);
         }
+        window.addEventListener("touchstart", (e) => {
+          if ((e.target === button || button.contains(e.target)) && e.cancelable) e.preventDefault();
+        }, { capture: true, passive: false });
         setInterval(() => {
           if (!button.isConnected && document.body) document.body.appendChild(button);
-          button.style.display = isWatch() && overlayVisible() ? "flex" : "none";
+          button.style.display = visible() ? "flex" : "none";
         }, 250);
       }
       function togglePictureInPicture() {
@@ -3500,6 +3519,121 @@
           clearTimeout(timer);
           timer = setTimeout(() => follow(list), 250);
         }, true);
+      }
+      var shortsVideo = () => shortsPage()?.querySelector("video") ?? document.querySelector("video");
+      function pauseIndicator() {
+        const icon = document.createElement("div");
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", width: "48", height: "48", fill: "white" })) svg.setAttribute(name, value);
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M8 5v14l11-7z");
+        svg.appendChild(path);
+        icon.appendChild(svg);
+        Object.assign(icon.style, {
+          position: "fixed",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "96px",
+          height: "96px",
+          borderRadius: "50%",
+          background: "rgba(0, 0, 0, 0.5)",
+          display: "none",
+          alignItems: "center",
+          justifyContent: "center",
+          pointerEvents: "none",
+          zIndex: "9999"
+        });
+        let hiddenUntil = 0;
+        const update = () => {
+          if (!icon.isConnected && document.body) document.body.appendChild(icon);
+          const video = isShorts() ? shortsVideo() : null;
+          const rect = video?.getBoundingClientRect();
+          const show = !!rect && rect.width > 0 && video.paused && !video.ended && Date.now() > hiddenUntil;
+          if (show) {
+            icon.style.left = rect.left + rect.width / 2 + "px";
+            icon.style.top = rect.top + rect.height / 2 + "px";
+          }
+          icon.style.display = show ? "flex" : "none";
+        };
+        for (const type of ["play", "pause", "playing", "emptied"]) document.addEventListener(type, update, true);
+        setInterval(update, 250);
+        return () => {
+          hiddenUntil = Date.now() + 500;
+          icon.style.display = "none";
+        };
+      }
+      function shortsGestures() {
+        const hideIndicator = pauseIndicator();
+        let start = null;
+        let swallow = false;
+        const owned = (e) => e.pointerType === "touch" && isShorts() && !sidePanelOpen() && !!shortsPage().contains(e.target) && !e.target.closest?.("yt-button-container, ytlr-button, button");
+        const videoId = () => player()?.getVideoData?.().video_id;
+        function isFirst() {
+          const list = shortsPage().querySelector("yt-virtual-list");
+          const items = [...shortsPage().querySelectorAll("yt-virtual-list > div > div")];
+          if (!list || !items.length) return null;
+          const top = list.getBoundingClientRect().top;
+          return !items.some((item) => top - item.getBoundingClientRect().top >= 10);
+        }
+        async function previous() {
+          const first = isFirst();
+          if (first) return back();
+          const before = videoId();
+          pressKey(UP);
+          if (first === null) {
+            await sleep(450);
+            if (isShorts() && videoId() === before) back();
+          }
+        }
+        function swipe(dy) {
+          hideIndicator();
+          if (document.activeElement?.closest("yt-button-container") && shortsPage().contains(document.activeElement)) pressKey(LEFT);
+          if (dy < 0) pressKey(DOWN);
+          else previous();
+        }
+        function tap() {
+          const p = player();
+          if (typeof p?.pauseVideo === "function" && typeof p.playVideo === "function") {
+            const video = shortsVideo();
+            if (video?.paused) p.playVideo();
+            else p.pauseVideo();
+            return;
+          }
+          pressKey(LEFT);
+          pressKey(ENTER);
+        }
+        window.addEventListener("pointerdown", (e) => {
+          if (!owned(e)) {
+            start = null;
+            swallow = false;
+            return;
+          }
+          start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+          swallow = true;
+          e.stopPropagation();
+        }, true);
+        for (const type of ["pointermove", "pointercancel", "mousedown", "mousemove", "mouseup", "click"]) {
+          window.addEventListener(type, (e) => {
+            if (!swallow) return;
+            e.stopPropagation();
+            if (type === "pointercancel") start = null;
+          }, true);
+        }
+        window.addEventListener("pointerup", (e) => {
+          if (!swallow) return;
+          e.stopPropagation();
+          setTimeout(() => swallow = false, 400);
+          if (!start || start.id !== e.pointerId) return;
+          const dx = e.clientX - start.x;
+          const dy = e.clientY - start.y;
+          start = null;
+          if (Math.abs(dy) > SWIPE_MIN && Math.abs(dy) > 2 * Math.abs(dx)) swipe(dy);
+          else if (Math.abs(dx) <= TAP_SLOP && Math.abs(dy) <= TAP_SLOP) tap();
+        }, true);
+        window.addEventListener("touchend", (e) => {
+          if (swallow && e.cancelable) e.preventDefault();
+        }, { capture: true, passive: false });
       }
       function playerGestures() {
         let start = null;
@@ -3575,10 +3709,11 @@
         window.__vtBack = back;
         if (document.head) disableZoom();
         else document.addEventListener("DOMContentLoaded", disableZoom, { once: true });
-        overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back);
-        overlayButton("64px", [{ d: "M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" }, { d: "M14 14h7v6h-7z", fill: "white" }], togglePictureInPicture);
+        overlayButton("10px", [{ d: "M15 5l-7 7 7 7" }], back, () => isWatch() && overlayVisible() || isShorts());
+        overlayButton("64px", [{ d: "M21 11V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" }, { d: "M14 14h7v6h-7z", fill: "white" }], togglePictureInPicture, () => isWatch() && overlayVisible());
         feedFollowsScroll();
         playerGestures();
+        shortsGestures();
       };
     }
   });
