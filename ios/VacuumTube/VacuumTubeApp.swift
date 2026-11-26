@@ -1,8 +1,6 @@
 import SwiftUI
 import UIKit
 
-// UIKit lifecycle so the root controller itself defers the side-edge system gestures: the first swipe from a side edge
-// is our back gesture, Stage Manager and the system get the second one. SwiftUI's .defersSystemGestures did not reach Stage Manager.
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     // A scene session saved by the earlier SwiftUI build comes back with SwiftUI's own delegate and stays black; take it over.
@@ -44,7 +42,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 }
 
 final class RootController: UIHostingController<AnyView> {
-    override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge { [.left, .right] }
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 

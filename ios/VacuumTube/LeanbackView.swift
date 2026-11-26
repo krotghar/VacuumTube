@@ -44,12 +44,11 @@ struct LeanbackView: UIViewRepresentable {
         webView.underPageBackgroundColor = Shell.backgroundColor
         webView.navigationDelegate = context.coordinator
         // Touches starting on these strips never reach the page, so the back swipe cannot scroll a shelf or tap the rail.
-        for leftEdge in [true, false] {
-            let strip = UIView(frame: CGRect(x: leftEdge ? 0 : -20, y: 0, width: 20, height: 0))
-            strip.autoresizingMask = leftEdge ? [.flexibleHeight, .flexibleRightMargin] : [.flexibleHeight, .flexibleLeftMargin]
-            strip.addGestureRecognizer(UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.backSwipe(_:))))
-            webView.addSubview(strip)
-        }
+        // Right edge only: Stage Manager owns the left edge and does not defer it.
+        let strip = UIView(frame: CGRect(x: -20, y: 0, width: 20, height: 0))
+        strip.autoresizingMask = [.flexibleHeight, .flexibleLeftMargin]
+        strip.addGestureRecognizer(UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.backSwipe(_:))))
+        webView.addSubview(strip)
         context.coordinator.attach(webView)
 
         #if DEBUG
@@ -83,9 +82,8 @@ struct LeanbackView: UIViewRepresentable {
         }
 
         @objc func backSwipe(_ gesture: UIPanGestureRecognizer) {
-            guard gesture.state == .ended, let strip = gesture.view, let webView = strip.superview as? WKWebView else { return }
-            let inward = strip.frame.minX < webView.bounds.midX ? 1.0 : -1.0
-            guard gesture.translation(in: webView).x * inward > 60 else { return }
+            guard gesture.state == .ended, let webView = gesture.view?.superview as? WKWebView else { return }
+            guard gesture.translation(in: webView).x < -60 else { return }
             webView.evaluateJavaScript("window.__vtBack?.()")
         }
 
