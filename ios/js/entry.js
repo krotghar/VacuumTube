@@ -5,6 +5,8 @@ if (location.host === 'www.youtube.com' && location.pathname === '/tv') {
         require('../../src/preload/modules/css'),
         require('../../src/preload/modules/h264ify'),
         require('../../src/preload/modules/media-capabilities'),
+        require('./sponsor-fetch'),
+        require('../../src/preload/modules/sponsorblock'),
         require('../../src/preload/modules/touch-support'),
         require('./touch'),
         require('./playback-state'),

@@ -13,6 +13,7 @@ struct LeanbackView: UIViewRepresentable {
 
         let content = config.userContentController
         content.add(context.coordinator, name: "vtPlayback")
+        content.addScriptMessageHandler(SponsorFetch(), contentWorld: .page, name: "vtFetch")
         #if DEBUG
         content.add(context.coordinator, name: "vt")
         content.addUserScript(Self.bundledScript("debug-probe", mainFrameOnly: true))
