@@ -8,6 +8,7 @@ struct VacuumTubeApp: App {
                 .ignoresSafeArea()
                 .statusBarHidden()
                 .persistentSystemOverlays(.hidden)
+                .background(Color(Shell.backgroundColor))
         }
     }
 }

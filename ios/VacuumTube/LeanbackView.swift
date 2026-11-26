@@ -9,76 +9,87 @@ struct LeanbackView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.allowsPictureInPictureMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.websiteDataStore = .default()
 
         let content = config.userContentController
+        content.add(context.coordinator, name: "vtPlayback")
+        #if DEBUG
         content.add(context.coordinator, name: "vt")
-        content.addUserScript(Self.bundledScript("probe"))
-        if Spike.touchSupport {
-            content.addUserScript(Self.bundledScript("touch-flag"))
+        content.addUserScript(Self.bundledScript("debug-probe", mainFrameOnly: true))
+        if Shell.allowAV1 {
+            content.addUserScript(WKUserScript(
+                source: "globalThis.__vtConfigOverrides = {h264ify_disable_av1: false}",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            ))
         }
-        if let injected = Spike.injectedScript {
+        #endif
+        content.addUserScript(Self.bundledScript("leanback-bundle", mainFrameOnly: false))
+        #if DEBUG
+        if let injected = Shell.injectedScript {
             content.addUserScript(WKUserScript(source: injected, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
+        #endif
 
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.customUserAgent = Spike.userAgent
+        webView.customUserAgent = Shell.userAgent
         webView.allowsBackForwardNavigationGestures = false
+        #if DEBUG
         webView.isInspectable = true
+        #endif
         webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.isOpaque = false
+        webView.backgroundColor = Shell.backgroundColor
+        webView.scrollView.backgroundColor = Shell.backgroundColor
+        webView.underPageBackgroundColor = Shell.backgroundColor
         webView.navigationDelegate = context.coordinator
         context.coordinator.attach(webView)
 
-        NSLog("[vt] ua=%@ touch=%@ url=%@", Spike.userAgent, String(Spike.touchSupport), Spike.startURL.absoluteString)
-        webView.load(URLRequest(url: Spike.startURL))
+        #if DEBUG
+        NSLog("[vt] ua=%@ allowAV1=%@ url=%@", Shell.userAgent, String(Shell.allowAV1), Shell.startURL.absoluteString)
+        #endif
+        webView.load(URLRequest(url: Shell.startURL))
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
 
-    private static func bundledScript(_ name: String) -> WKUserScript {
+    private static func bundledScript(_ name: String, mainFrameOnly: Bool) -> WKUserScript {
         let url = Bundle.main.url(forResource: name, withExtension: "js")!
         let source = try! String(contentsOf: url, encoding: .utf8)
-        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: mainFrameOnly)
     }
 
     @MainActor
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        private weak var webView: WKWebView?
-        private var urlObservation: NSKeyValueObservation?
-        private var commandTimer: Timer?
+        #if DEBUG
+        weak var webView: WKWebView?
+        var urlObservation: NSKeyValueObservation?
+        var commandTimer: Timer?
+        #endif
 
         func attach(_ webView: WKWebView) {
+            #if DEBUG
             self.webView = webView
-            urlObservation = webView.observe(\.url, options: [.new]) { _, change in
-                let url = change.newValue??.absoluteString ?? "nil"
-                Task { @MainActor in NSLog("[vt] url %@", url) }
-            }
-            // Spike-only remote eval: drop JS into Documents/cmd.js, result goes to the log.
-            commandTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                Task { @MainActor in self?.runPendingCommand() }
-            }
-        }
-
-        private func runPendingCommand() {
-            guard let webView,
-                  let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-            let file = dir.appendingPathComponent("cmd.js")
-            guard let source = try? String(contentsOf: file, encoding: .utf8) else { return }
-            try? FileManager.default.removeItem(at: file)
-            webView.callAsyncJavaScript(source, arguments: [:], in: nil, in: .page) { result in
-                switch result {
-                case .success(let value):
-                    NSLog("[vt] eval ok %@", String(describing: value))
-                case .failure(let error):
-                    NSLog("[vt] eval error %@", String(describing: error))
-                }
-            }
+            startDebugTools(for: webView)
+            #endif
         }
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "vtPlayback" {
+                let playing = (message.body as? Bool) ?? false
+                UIApplication.shared.isIdleTimerDisabled = playing
+                #if DEBUG
+                NSLog("[vt] idle disabled=%@", String(playing))
+                #endif
+                return
+            }
+            #if DEBUG
             NSLog("[vt] js %@", String(describing: message.body))
+            #endif
         }
 
+        #if DEBUG
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
             if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse {
                 NSLog("[vt] main frame %ld %@", http.statusCode, http.url?.absoluteString ?? "")
@@ -93,9 +104,13 @@ struct LeanbackView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             NSLog("[vt] didFailProvisional %@", String(describing: error))
         }
+        #endif
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            UIApplication.shared.isIdleTimerDisabled = false
+            #if DEBUG
             NSLog("[vt] content process terminated")
+            #endif
         }
     }
 }
