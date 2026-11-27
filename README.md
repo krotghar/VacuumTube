@@ -12,7 +12,7 @@ YouTube Leanback is an official HTML5 interface, which YouTube serves only to co
 
 - Touch controls for Leanback: tap, scroll the shelves with a finger, swipe from the right edge to go back, swipe down to close the player
 - Ad blocking, using the upstream adblock module
-- SponsorBlock: sponsored segments are skipped automatically
+- [SponsorBlock](https://sponsor.ajay.app/): sponsored segments are skipped automatically
 - Background playback through Picture in Picture
 - In-app mini player
 - Playback speed stays the same from one video to the next
@@ -50,3 +50,5 @@ Then open `ios/VacuumTube.xcodeproj` in Xcode. Set your own signing team and bun
 ## Credits
 
 Built on top of [VacuumTube](https://github.com/shy1132/VacuumTube) by shy1132. See [LICENSE](LICENSE).
+
+SponsorBlock data comes from the community database at [sponsor.ajay.app](https://sponsor.ajay.app/), licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
